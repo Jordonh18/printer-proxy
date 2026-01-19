@@ -79,7 +79,6 @@ jobs:
     name: Build Package
     runs-on: ubuntu-latest
     needs: check-changes
-    if: needs.check-changes.outputs.should_release == 'true'
     
     steps:
       - name: Checkout code
@@ -152,7 +151,6 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Download build artifacts
-        if: needs.check-changes.outputs.should_release == 'true'
         uses: actions/download-artifact@v4
         with:
           name: debian-package
@@ -165,13 +163,11 @@ jobs:
             iptables iproute2 iputils-ping arping nginx openssl
       
       - name: Test installation
-        if: needs.check-changes.outputs.should_release == 'true'
         run: |
           VERSION="${{ needs.check-changes.outputs.new_version }}"
           sudo dpkg -i "builds/printer-proxy_${VERSION}_all.deb" || sudo apt-get install -f -y
       
       - name: Verify installation
-        if: needs.check-changes.outputs.should_release == 'true'
         run: |
           [ -d "/opt/printer-proxy" ] && echo "OK: App directory exists"
           [ -d "/opt/printer-proxy/venv" ] && echo "OK: Virtual environment created"
@@ -180,15 +176,11 @@ jobs:
           cd /opt/printer-proxy
           sudo -u printer-proxy /opt/printer-proxy/venv/bin/python -c "from app import create_app; print('Imports OK')"
 
-      - name: Smoke test (no release)
-        if: needs.check-changes.outputs.should_release != 'true'
-        run: |
-          python3 -c "from app import create_app; print('Imports OK')"
-
   release:
     name: Create Release
     runs-on: ubuntu-latest
     needs: [check-changes, build, test]
+    if: needs.check-changes.outputs.should_release == 'true'
     
     steps:
       - name: Checkout code
@@ -237,6 +229,7 @@ jobs:
     name: Deploy APT Repository
     runs-on: ubuntu-latest
     needs: [check-changes, release]
+    if: needs.check-changes.outputs.should_release == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
