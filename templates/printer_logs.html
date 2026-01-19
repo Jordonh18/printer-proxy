@@ -35,7 +35,7 @@
         margin-bottom: 1rem;
     }
     .page-title {
-        font-size: 1.25rem;
+        font-size: 1.5rem;
         font-weight: 600;
         color: var(--foreground);
         margin: 0;
@@ -140,20 +140,6 @@
         color: hsl(215.4 16.3% 40%);
     }
     
-    /* Empty state */
-    .empty-state {
-        padding: 3rem 2rem;
-        text-align: center;
-        color: var(--muted);
-        font-size: 0.875rem;
-    }
-    .empty-state i {
-        font-size: 2rem;
-        opacity: 0.5;
-        display: block;
-        margin-bottom: 0.5rem;
-    }
-    
     /* Footer */
     .footer-note {
         font-size: 0.75rem;
@@ -186,7 +172,7 @@
 <div class="detail-card">
     {% if logs %}
     <div class="table-responsive">
-        <table class="modern-table">
+        <table class="modern-table data-table">
             <thead>
                 <tr>
                     <th>Severity</th>
@@ -212,10 +198,17 @@
         </table>
     </div>
     {% else %}
-    <div class="empty-state">
-        <i class="bi bi-check-circle"></i>
-        <strong>No Active Logs</strong><br>
-        The printer is operating normally.
+    <div class="empty-state-modern">
+        <div class="empty-illustration" aria-hidden="true">
+            <svg viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="34" y="30" width="172" height="120" rx="18" fill="var(--background-secondary)" stroke="var(--border)" />
+                <rect x="60" y="62" width="120" height="10" rx="5" fill="var(--border)" />
+                <rect x="60" y="86" width="98" height="10" rx="5" fill="var(--border)" />
+                <circle cx="92" cy="116" r="10" fill="var(--success)" opacity="0.4" />
+            </svg>
+        </div>
+        <div class="empty-title">All clear</div>
+        <p class="empty-text">No active events reported. This printer is operating normally.</p>
     </div>
     {% endif %}
 </div>
@@ -224,3 +217,4 @@
     Showing {{ logs|length }} log entr{{ 'ies' if logs|length != 1 else 'y' }} from printer SNMP event log.
 </p>
 {% endblock %}
+

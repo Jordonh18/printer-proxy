@@ -134,24 +134,6 @@
         color: var(--danger-text);
     }
     
-    /* Empty state */
-    .empty-state {
-        padding: 3rem 2rem;
-        text-align: center;
-        color: var(--muted);
-    }
-    .empty-state i {
-        font-size: 3rem;
-        margin-bottom: 1rem;
-        opacity: 0.5;
-    }
-    .empty-state h3 {
-        font-size: 1rem;
-        font-weight: 600;
-        color: var(--foreground);
-        margin-bottom: 0.5rem;
-    }
-    
     .text-muted {
         color: var(--muted);
     }
@@ -167,6 +149,11 @@
     <span class="active">Print Queue</span>
 </nav>
 
+<div class="page-header d-flex justify-content-between align-items-center">
+    <h1 class="page-title">Print Queue</h1>
+    <span class="text-muted" style="font-size: 0.8rem;">Live updates from the printer</span>
+</div>
+
 <div class="table-card">
     <div class="table-card-header">
         <div class="header-left">
@@ -177,7 +164,7 @@
     </div>
     <div id="queue-container">
         {% if queue %}
-        <table class="queue-table">
+        <table class="queue-table data-table">
             <thead>
                 <tr>
                     <th>Job ID</th>
@@ -212,14 +199,16 @@
             </tbody>
         </table>
         {% else %}
-        <div class="empty-state">
-            <i class="bi bi-printer"></i>
-            <h3>No active print job</h3>
-            <p>The printer is not currently printing</p>
-            <small class="text-muted d-block mt-2">
-                Jobs appear here only while actively printing.<br>
-                See Job History for past print jobs.
-            </small>
+        <div class="empty-state-modern">
+            <div class="empty-illustration" aria-hidden="true">
+                <svg viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="32" y="44" width="176" height="96" rx="18" fill="var(--background-secondary)" stroke="var(--border)" />
+                    <rect x="72" y="24" width="96" height="38" rx="10" fill="var(--card-bg)" stroke="var(--border)" />
+                    <rect x="84" y="88" width="72" height="32" rx="8" fill="var(--card-bg)" stroke="var(--border)" />
+                </svg>
+            </div>
+            <div class="empty-title">No active print jobs</div>
+            <p class="empty-text">This queue stays empty until a job is in progress. Check Job History for past prints.</p>
         </div>
         {% endif %}
     </div>
@@ -259,21 +248,23 @@
         
         if (queue.length === 0) {
             container.innerHTML = `
-                <div class="empty-state">
-                    <i class="bi bi-printer"></i>
-                    <h3>No active print job</h3>
-                    <p>The printer is not currently printing</p>
-                    <small class="text-muted d-block mt-2">
-                        Jobs appear here only while actively printing.<br>
-                        See Job History for past print jobs.
-                    </small>
+                <div class="empty-state-modern">
+                    <div class="empty-illustration" aria-hidden="true">
+                        <svg viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="32" y="44" width="176" height="96" rx="18" fill="var(--background-secondary)" stroke="var(--border)" />
+                            <rect x="72" y="24" width="96" height="38" rx="10" fill="var(--card-bg)" stroke="var(--border)" />
+                            <rect x="84" y="88" width="72" height="32" rx="8" fill="var(--card-bg)" stroke="var(--border)" />
+                        </svg>
+                    </div>
+                    <div class="empty-title">No active print jobs</div>
+                    <p class="empty-text">This queue stays empty until a job is in progress. Check Job History for past prints.</p>
                 </div>
             `;
             return;
         }
         
         let html = `
-            <table class="queue-table">
+            <table class="queue-table data-table">
                 <thead>
                     <tr>
                         <th>Job ID</th>
@@ -313,5 +304,6 @@
             evtSource.close();
         }
     });
+
 </script>
 {% endblock %}

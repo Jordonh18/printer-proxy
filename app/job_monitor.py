@@ -112,9 +112,21 @@ class JobMonitor:
                 from app.printers import get_registry
                 registry = get_registry()
                 printers = registry.get_all()
-                
+
+                if not printers:
+                    # No printers registered; avoid unnecessary polling
+                    logger.debug("Job monitor: no printers registered, skipping poll")
+                    return
+
                 logger.info(f"Job monitor polling {len(printers)} printers")
-                
+
+                current_ips = {printer.ip for printer in printers}
+                # Clean up stale states for removed printers to avoid memory growth
+                with self._lock:
+                    stale_ips = set(self._printer_states.keys()) - current_ips
+                    for ip in stale_ips:
+                        self._printer_states.pop(ip, None)
+
                 for printer in printers:
                     try:
                         self._check_printer(printer)

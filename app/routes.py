@@ -7,8 +7,8 @@ from flask import (
 )
 from flask_login import login_user, logout_user, login_required, current_user
 
-from app.models import AuditLog, ActiveRedirect
-from app.auth import authenticate_user, create_initial_admin, validate_password_strength
+from app.models import AuditLog, ActiveRedirect, User
+from app.auth import authenticate_user, create_initial_admin, validate_password_strength, role_required, hash_password
 from app.printers import get_registry, Printer
 from app.network import get_network_manager
 from app.discovery import get_discovery
@@ -136,6 +136,7 @@ def printer_logs(printer_id):
 
 @main_bp.route('/redirect/<printer_id>', methods=['POST'])
 @login_required
+@role_required('admin', 'operator')
 def create_redirect(printer_id):
     """Create a new redirect for a printer."""
     registry = get_registry()
@@ -227,6 +228,7 @@ def create_redirect(printer_id):
 
 @main_bp.route('/redirect/<printer_id>/remove', methods=['POST'])
 @login_required
+@role_required('admin', 'operator')
 def remove_redirect(printer_id):
     """Remove an active redirect."""
     registry = get_registry()
@@ -285,6 +287,7 @@ def remove_redirect(printer_id):
 
 @main_bp.route('/audit')
 @login_required
+@role_required('admin', 'operator')
 def audit_log():
     """View audit log."""
     logs = AuditLog.get_recent(limit=200)
@@ -293,6 +296,7 @@ def audit_log():
 
 @main_bp.route('/statistics')
 @login_required
+@role_required('admin', 'operator')
 def statistics():
     """View redirect statistics."""
     from app.models import RedirectHistory
@@ -309,6 +313,7 @@ def statistics():
 
 @main_bp.route('/printers/manage')
 @login_required
+@role_required('admin', 'operator')
 def manage_printers():
     """Printer management page."""
     registry = get_registry()
@@ -318,6 +323,7 @@ def manage_printers():
 
 @main_bp.route('/printers/add', methods=['GET', 'POST'])
 @login_required
+@role_required('admin')
 def add_printer():
     """Add a new printer."""
     registry = get_registry()
@@ -394,6 +400,7 @@ def add_printer():
 
 @main_bp.route('/printers/<printer_id>/edit', methods=['GET', 'POST'])
 @login_required
+@role_required('admin')
 def edit_printer(printer_id):
     """Edit an existing printer."""
     registry = get_registry()
@@ -484,6 +491,7 @@ def edit_printer(printer_id):
 
 @main_bp.route('/printers/<printer_id>/delete', methods=['POST'])
 @login_required
+@role_required('admin')
 def delete_printer(printer_id):
     """Delete a printer."""
     registry = get_registry()
@@ -523,6 +531,7 @@ def delete_printer(printer_id):
 
 @main_bp.route('/printers/discover', methods=['GET', 'POST'])
 @login_required
+@role_required('admin')
 def discover_printers():
     """Discover printers on the network."""
     if request.method == 'POST':
@@ -553,6 +562,7 @@ def discover_printers():
 
 @main_bp.route('/printers/import', methods=['POST'])
 @login_required
+@role_required('admin')
 def import_discovered_printer():
     """Import a discovered printer."""
     registry = get_registry()
@@ -803,6 +813,7 @@ def api_check_printer(printer_id):
 
 @api_bp.route('/redirects')
 @login_required
+@role_required('admin', 'operator')
 def api_redirects():
     """Get all active redirects."""
     redirects = ActiveRedirect.get_all()
@@ -821,6 +832,7 @@ def api_redirects():
 
 @api_bp.route('/network/status')
 @login_required
+@role_required('admin')
 def api_network_status():
     """Get current network status (secondary IPs and NAT rules)."""
     network = get_network_manager()
@@ -917,6 +929,7 @@ def api_printer_health(printer_id):
 
 @api_bp.route('/printers/<printer_id>/refresh')
 @login_required
+@role_required('admin', 'operator')
 def api_printer_refresh(printer_id):
     """Force a live status check for a printer (bypasses cache)."""
     registry = get_registry()
@@ -963,6 +976,7 @@ def api_update_status():
 
 @api_bp.route('/update/check', methods=['POST'])
 @login_required
+@role_required('admin')
 def api_update_check():
     """Force an update check."""
     from app.updater import get_update_manager
@@ -985,6 +999,7 @@ def api_update_check():
 
 @api_bp.route('/update/start', methods=['POST'])
 @login_required  
+@role_required('admin')
 def api_update_start():
     """Start the update process."""
     from app.updater import get_update_manager
@@ -1009,11 +1024,132 @@ def api_update_start():
 
 @main_bp.route('/settings')
 @login_required
+@role_required('admin')
 def settings_page():
     """Settings page for application configuration."""
     from app.settings import get_settings_manager
     settings = get_settings_manager().get_all()
     return render_template('settings.html', settings=settings)
+
+
+# =========================================================================
+# User Management (RBAC)
+# =========================================================================
+
+@main_bp.route('/users')
+@login_required
+@role_required('admin')
+def user_management():
+    """User management list for admins."""
+    users = User.get_all()
+    return render_template('user_management.html', users=users)
+
+
+@main_bp.route('/users/add', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def user_add():
+    """Create a new user."""
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        role = request.form.get('role', 'viewer').strip()
+        is_active = request.form.get('is_active') == 'on'
+
+        if not username:
+            flash('Username is required', 'error')
+            return render_template('user_form.html', mode='add', form_data=request.form)
+
+        if User.get_by_username(username):
+            flash('Username already exists', 'error')
+            return render_template('user_form.html', mode='add', form_data=request.form)
+
+        if role not in ['admin', 'operator', 'viewer']:
+            flash('Invalid role selected', 'error')
+            return render_template('user_form.html', mode='add', form_data=request.form)
+
+        if password != confirm_password:
+            flash('Passwords do not match', 'error')
+            return render_template('user_form.html', mode='add', form_data=request.form)
+
+        is_valid, error = validate_password_strength(password)
+        if not is_valid:
+            flash(error, 'error')
+            return render_template('user_form.html', mode='add', form_data=request.form)
+
+        User.create(username, hash_password(password), role=role, is_active=is_active)
+        AuditLog.log(
+            username=current_user.username,
+            action='USER_CREATED',
+            details=f"Created user '{username}' with role '{role}'",
+            success=True
+        )
+        flash(f"User '{username}' created", 'success')
+        return redirect(url_for('main.user_management'))
+
+    return render_template('user_form.html', mode='add', form_data={})
+
+
+@main_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def user_edit(user_id: int):
+    """Edit an existing user."""
+    user = User.get_by_id(user_id)
+    if not user:
+        flash('User not found', 'error')
+        return redirect(url_for('main.user_management'))
+
+    if request.method == 'POST':
+        role = request.form.get('role', '').strip()
+        is_active = request.form.get('is_active') == 'on'
+        new_password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+
+        if role not in ['admin', 'operator', 'viewer']:
+            flash('Invalid role selected', 'error')
+            return render_template('user_form.html', mode='edit', user=user)
+
+        admins = [u for u in User.get_all() if u.role == 'admin']
+        if user.role == 'admin' and role != 'admin' and len(admins) <= 1:
+            flash('At least one admin is required', 'error')
+            return render_template('user_form.html', mode='edit', user=user)
+        if user.id == current_user.id and role != 'admin':
+            flash('You cannot remove your own admin access', 'error')
+            return render_template('user_form.html', mode='edit', user=user)
+        if user.id == current_user.id and not is_active:
+            flash('You cannot disable your own account', 'error')
+            return render_template('user_form.html', mode='edit', user=user)
+
+        if new_password or confirm_password:
+            if new_password != confirm_password:
+                flash('Passwords do not match', 'error')
+                return render_template('user_form.html', mode='edit', user=user)
+            is_valid, error = validate_password_strength(new_password)
+            if not is_valid:
+                flash(error, 'error')
+                return render_template('user_form.html', mode='edit', user=user)
+            user.update_password(hash_password(new_password))
+            AuditLog.log(
+                username=current_user.username,
+                action='USER_PASSWORD_RESET',
+                details=f"Reset password for '{user.username}'",
+                success=True
+            )
+
+        user.update_role(role)
+        user.set_active(is_active)
+        AuditLog.log(
+            username=current_user.username,
+            action='USER_UPDATED',
+            details=f"Updated user '{user.username}' (role={role}, active={is_active})",
+            success=True
+        )
+        flash(f"User '{user.username}' updated", 'success')
+        return redirect(url_for('main.user_management'))
+
+    return render_template('user_form.html', mode='edit', user=user)
 
 
 # ============================================================================
@@ -1022,6 +1158,7 @@ def settings_page():
 
 @api_bp.route('/settings/notifications/smtp', methods=['GET', 'POST'])
 @login_required
+@role_required('admin')
 def api_settings_smtp():
     """Get or update SMTP notification settings."""
     from app.settings import get_settings_manager
@@ -1066,6 +1203,7 @@ def api_settings_smtp():
 
 @api_bp.route('/settings/notifications/smtp/test', methods=['POST'])
 @login_required
+@role_required('admin')
 def api_settings_smtp_test():
     """Send a test email using current SMTP settings."""
     from app.notifications import get_notification_manager

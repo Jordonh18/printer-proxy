@@ -137,6 +137,59 @@
         color: var(--foreground);
         text-decoration: none;
     }
+
+    .page-header {
+        margin-bottom: 1.5rem;
+    }
+    .page-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin: 0;
+    }
+
+    .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+    .quick-action-card {
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        background: var(--card-bg);
+        padding: 0.85rem 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        text-decoration: none;
+        color: var(--foreground);
+        transition: all 0.15s ease;
+        box-shadow: var(--card-shadow);
+    }
+    .quick-action-card:hover {
+        background: var(--table-hover);
+        border-color: var(--muted);
+        color: var(--foreground);
+        text-decoration: none;
+    }
+    .quick-action-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 0.6rem;
+        display: grid;
+        place-items: center;
+        background: var(--background-secondary);
+        color: var(--muted);
+    }
+    .quick-action-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+    .quick-action-subtitle {
+        font-size: 0.75rem;
+        color: var(--muted);
+    }
     
     /* Active redirects table */
     .redirects-card {
@@ -188,40 +241,168 @@
     }
     
     /* Empty state */
-    .empty-state {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: 0.75rem;
-        padding: 3rem 2rem;
+    .dashboard-empty {
+        padding: 4.5rem 1rem 5rem;
         text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.25rem;
     }
-    .empty-state h5 {
-        color: var(--foreground);
+    .dashboard-illustration {
+        width: 240px;
+        height: 180px;
+        display: grid;
+        place-items: center;
     }
-    .empty-state p {
+    .dashboard-illustration svg {
+        width: 100%;
+        height: 100%;
+    }
+    .dashboard-empty-kicker {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
         color: var(--muted);
+        margin: 0 0 0.35rem;
+    }
+    .dashboard-empty-title {
+        font-size: 1.35rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin: 0 0 0.5rem;
+    }
+    .dashboard-empty-body {
+        color: var(--muted);
+        max-width: 520px;
+        margin: 0 auto;
+        line-height: 1.6;
+        font-size: 0.95rem;
+    }
+
+    /* Loading state */
+    .printer-card.loading {
+        position: relative;
+        color: transparent;
+    }
+    .printer-card.loading * {
+        color: transparent !important;
+    }
+    .printer-card.loading::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+        transform: translateX(-100%);
+        animation: shimmer 1.2s infinite;
+    }
+    [data-theme="dark"] .printer-card.loading::after {
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Printer Dashboard</h2>
+<div class="page-header d-flex justify-content-between align-items-center">
+    <h1 class="page-title">Dashboard</h1>
     <div class="d-flex gap-2 align-items-center">
-        <span class="text-muted" style="font-size: 0.75rem;" id="last-update"></span>
         <button class="btn-modern btn-outline-modern" onclick="refreshDashboard()" id="refresh-btn">
             <i class="bi bi-arrow-clockwise" id="refresh-icon"></i> Refresh
         </button>
     </div>
 </div>
 
+{% set counts = namespace(total=printers|length, online=0, offline=0, redirected=0, target=0) %}
+{% for item in printers %}
+    {% if item.status.is_redirected %}
+        {% set counts.redirected = counts.redirected + 1 %}
+    {% elif item.status.is_redirect_target %}
+        {% set counts.target = counts.target + 1 %}
+    {% endif %}
+    {% if item.status.is_online %}
+        {% set counts.online = counts.online + 1 %}
+    {% else %}
+        {% set counts.offline = counts.offline + 1 %}
+    {% endif %}
+{% endfor %}
+
+<div class="status-strip">
+    <div class="status-strip-card">
+        <div class="status-strip-label">Total Printers</div>
+        <div class="status-strip-value" id="count-total">{{ counts.total }}</div>
+    </div>
+    <div class="status-strip-card">
+        <div class="status-strip-label">Online</div>
+        <div class="status-strip-value" id="count-online">{{ counts.online }}</div>
+    </div>
+    <div class="status-strip-card">
+        <div class="status-strip-label">Offline</div>
+        <div class="status-strip-value" id="count-offline">{{ counts.offline }}</div>
+    </div>
+    <div class="status-strip-card">
+        <div class="status-strip-label">Redirected</div>
+        <div class="status-strip-value" id="count-redirected">{{ counts.redirected }}</div>
+    </div>
+    <div class="status-strip-card">
+        <div class="status-strip-label">Redirect Targets</div>
+        <div class="status-strip-value" id="count-target">{{ counts.target }}</div>
+    </div>
+    <div class="status-strip-card">
+        <div class="status-strip-label">Active Redirects</div>
+        <div class="status-strip-value">{{ active_redirects|length }}</div>
+    </div>
+    <div class="status-strip-card">
+        <div class="status-strip-label">Last Refresh</div>
+        <div class="status-strip-value" id="last-update-strip">Just now</div>
+    </div>
+</div>
+
+{% if current_user.role in ['admin', 'operator'] %}
+<div class="quick-actions">
+    {% if current_user.role == 'admin' %}
+    <a href="{{ url_for('main.add_printer') }}" class="quick-action-card">
+        <div class="quick-action-icon"><i class="bi bi-plus-lg"></i></div>
+        <div>
+            <div class="quick-action-title">Add Printer</div>
+            <div class="quick-action-subtitle">Register a new device</div>
+        </div>
+    </a>
+    <a href="{{ url_for('main.discover_printers') }}" class="quick-action-card">
+        <div class="quick-action-icon"><i class="bi bi-radar"></i></div>
+        <div>
+            <div class="quick-action-title">Discover</div>
+            <div class="quick-action-subtitle">Scan your network</div>
+        </div>
+    </a>
+    {% endif %}
+    {% if current_user.role in ['admin', 'operator'] %}
+    <a href="{{ url_for('main.manage_printers') }}" class="quick-action-card">
+        <div class="quick-action-icon"><i class="bi bi-sliders"></i></div>
+        <div>
+            <div class="quick-action-title">Manage Fleet</div>
+            <div class="quick-action-subtitle">Edit, tag, organize</div>
+        </div>
+    </a>
+    {% endif %}
+    {% if current_user.role == 'admin' %}
+    <a href="{{ url_for('main.settings_page') }}" class="quick-action-card">
+        <div class="quick-action-icon"><i class="bi bi-gear"></i></div>
+        <div>
+            <div class="quick-action-title">Settings</div>
+            <div class="quick-action-subtitle">Alerts and system</div>
+        </div>
+    </a>
+    {% endif %}
+</div>
+{% endif %}
+
 {% if active_redirects %}
 <div class="redirects-card mb-4">
-    <div class="card-header">
-        <i class="bi bi-arrow-left-right"></i> Active Redirects
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <div><i class="bi bi-arrow-left-right"></i> Active Redirects</div>
     </div>
     <div class="card-body">
-        <table class="redirects-table">
+        <table class="redirects-table data-table">
             <thead>
                 <tr>
                     <th>Source Printer</th>
@@ -245,6 +426,7 @@
                     <td>{{ redirect.enabled_at }}</td>
                     <td>{{ redirect.enabled_by }}</td>
                     <td>
+                        {% if current_user.role in ['admin', 'operator'] %}
                         <form method="POST" action="{{ url_for('main.remove_redirect', printer_id=redirect.source_printer_id) }}" 
                               class="d-inline" onsubmit="return confirm('Remove this redirect?');">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -252,6 +434,9 @@
                                 Remove
                             </button>
                         </form>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -261,12 +446,33 @@
 </div>
 {% endif %}
 
-<div class="row">
+{% if printers %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="filter-chips" id="dashboard-filters">
+        <button class="filter-chip active" data-filter="all">All</button>
+        <button class="filter-chip" data-filter="online">Online</button>
+        <button class="filter-chip" data-filter="offline">Offline</button>
+        <button class="filter-chip" data-filter="redirected">Redirected</button>
+        <button class="filter-chip" data-filter="target">Targets</button>
+    </div>
+</div>
+{% endif %}
+
+<div class="row" id="printer-grid">
     {% for item in printers %}
     {% set printer = item.printer %}
     {% set status = item.status %}
-    <div class="col-md-6 col-lg-4 mb-4">
-        <a href="{{ url_for('main.printer_detail', printer_id=printer.id) }}" class="card printer-card h-100" data-printer-id="{{ printer.id }}">
+    {% if status.is_redirected %}
+        {% set status_key = 'redirected' %}
+    {% elif status.is_redirect_target %}
+        {% set status_key = 'target' %}
+    {% elif status.is_online %}
+        {% set status_key = 'online' %}
+    {% else %}
+        {% set status_key = 'offline' %}
+    {% endif %}
+    <div class="col-md-6 col-lg-4 mb-4" data-status="{{ status_key }}">
+        <a href="{{ url_for('main.printer_detail', printer_id=printer.id) }}" class="card printer-card h-100" data-printer-id="{{ printer.id }}" data-status="{{ status_key }}">
             <div class="card-header d-flex justify-content-between align-items-center {% if status.is_redirected %}status-header-redirected{% elif status.is_redirect_target %}status-header-target{% elif status.is_online %}status-header-online{% else %}status-header-offline{% endif %}">
                 <span class="printer-name">{{ printer.name }}</span>
                 {% if status.is_redirected %}
@@ -304,7 +510,7 @@
                 </div>
                 {% endif %}
                 
-                {% if status.is_redirected %}
+                {% if status.is_redirected and current_user.role in ['admin', 'operator'] %}
                 <div class="d-flex gap-2 mt-3">
                     <form method="POST" action="{{ url_for('main.remove_redirect', printer_id=printer.id) }}"
                           class="flex-grow-1" onsubmit="event.stopPropagation(); return confirm('Remove redirect?');" onclick="event.stopPropagation();">
@@ -314,7 +520,7 @@
                         </button>
                     </form>
                 </div>
-                {% elif not status.is_online and not status.is_redirect_target %}
+                {% elif not status.is_online and not status.is_redirect_target and current_user.role in ['admin', 'operator'] %}
                 <div class="d-flex gap-2 mt-3">
                     <span class="btn btn-danger flex-grow-1">
                         Redirect
@@ -328,18 +534,32 @@
 </div>
 
 {% if not printers %}
-<div class="card">
-    <div class="card-body text-center py-5">
-        <h5 class="mt-3">No Printers Configured</h5>
-        <p class="text-muted mb-3">Get started by discovering printers on your network or adding them manually.</p>
-        <div class="btn-group">
-            <a href="{{ url_for('main.discover_printers') }}" class="btn btn-outline-primary">
-                Discover Printers
-            </a>
-            <a href="{{ url_for('main.add_printer') }}" class="btn btn-success">
-                Add Printer
-            </a>
-        </div>
+<div class="dashboard-empty">
+    <div class="dashboard-illustration" aria-hidden="true">
+        <svg viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <linearGradient id="dashGlow" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="var(--primary)" stop-opacity="0.15" />
+                    <stop offset="100%" stop-color="var(--primary)" stop-opacity="0.02" />
+                </linearGradient>
+            </defs>
+            <circle cx="186" cy="36" r="32" fill="url(#dashGlow)" />
+            <rect x="24" y="54" width="192" height="92" rx="18" fill="var(--background-secondary)" stroke="var(--border)" />
+            <rect x="64" y="24" width="112" height="44" rx="10" fill="var(--card-bg)" stroke="var(--border)" />
+            <rect x="72" y="90" width="96" height="44" rx="10" fill="var(--card-bg)" stroke="var(--border)" />
+            <circle cx="178" cy="98" r="6" fill="var(--primary)" opacity="0.7" />
+            <circle cx="160" cy="98" r="6" fill="var(--primary)" opacity="0.25" />
+            <path d="M78 126h84" stroke="var(--border)" stroke-width="2" stroke-linecap="round" />
+            <path d="M88 142h64" stroke="var(--border)" stroke-width="2" stroke-linecap="round" />
+        </svg>
+    </div>
+    <div>
+        <p class="dashboard-empty-kicker">It’s looking quiet in here</p>
+        <h3 class="dashboard-empty-title">Your printer fleet hasn’t landed yet.</h3>
+        <p class="dashboard-empty-body">
+            Once printers are added, this space becomes your real-time command center for health,
+            redirects, and activity in one calm, focused view.
+        </p>
     </div>
 </div>
 {% endif %}
@@ -348,24 +568,32 @@
 {% block extra_js %}
 <script>
 let lastUpdate = new Date();
-const updateTimeEl = document.getElementById('last-update');
+const updateTimeStrip = document.getElementById('last-update-strip');
 
 function updateLastTime() {
     const now = new Date();
     const diff = Math.round((now - lastUpdate) / 1000);
     if (diff < 60) {
-        updateTimeEl.textContent = diff === 0 ? 'Just now' : `${diff}s ago`;
+        const text = diff === 0 ? 'Just now' : `${diff}s ago`;
+        if (updateTimeStrip) {
+            updateTimeStrip.textContent = text;
+        }
     } else {
-        updateTimeEl.textContent = `${Math.round(diff / 60)}m ago`;
+        const text = `${Math.round(diff / 60)}m ago`;
+        if (updateTimeStrip) {
+            updateTimeStrip.textContent = text;
+        }
     }
 }
 
 function refreshDashboard() {
     const btn = document.getElementById('refresh-btn');
     const icon = document.getElementById('refresh-icon');
+    const cards = document.querySelectorAll('.printer-card');
     
     btn.disabled = true;
     icon.classList.add('spin');
+    cards.forEach(card => card.classList.add('loading'));
     
     // Use the fast cached endpoint
     fetch('/api/dashboard/status')
@@ -380,6 +608,7 @@ function refreshDashboard() {
             });
             lastUpdate = new Date();
             updateLastTime();
+            refreshCounts();
         })
         .catch(err => {
             console.error('Error refreshing:', err);
@@ -387,13 +616,40 @@ function refreshDashboard() {
         .finally(() => {
             btn.disabled = false;
             icon.classList.remove('spin');
+            cards.forEach(card => card.classList.remove('loading'));
         });
+}
+
+function refreshCounts() {
+    const cards = document.querySelectorAll('#printer-grid > [data-status]');
+    const totals = { total: cards.length, online: 0, offline: 0, redirected: 0, target: 0 };
+    cards.forEach(card => {
+        const key = card.dataset.status;
+        if (totals[key] !== undefined) {
+            totals[key] += 1;
+        }
+    });
+
+    const map = {
+        total: document.getElementById('count-total'),
+        online: document.getElementById('count-online'),
+        offline: document.getElementById('count-offline'),
+        redirected: document.getElementById('count-redirected'),
+        target: document.getElementById('count-target')
+    };
+    Object.keys(map).forEach(key => {
+        if (map[key]) {
+            map[key].textContent = totals[key];
+        }
+    });
+
 }
 
 function updatePrinterCard(card, item) {
     const status = item.status;
     const header = card.querySelector('.card-header');
     const badge = card.querySelector('.status-badge');
+    let statusKey = 'offline';
     
     // Update header class
     header.classList.remove('status-header-online', 'status-header-offline', 'status-header-redirected', 'status-header-target');
@@ -403,18 +659,28 @@ function updatePrinterCard(card, item) {
         header.classList.add('status-header-redirected');
         badge.classList.add('status-redirected');
         badge.textContent = 'Redirected';
+        statusKey = 'redirected';
     } else if (status.is_redirect_target) {
         header.classList.add('status-header-target');
         badge.classList.add('status-target');
         badge.textContent = 'Target';
+        statusKey = 'target';
     } else if (status.is_online) {
         header.classList.add('status-header-online');
         badge.classList.add('status-online');
         badge.textContent = 'Online';
+        statusKey = 'online';
     } else {
         header.classList.add('status-header-offline');
         badge.classList.add('status-offline');
         badge.textContent = 'Offline';
+        statusKey = 'offline';
+    }
+
+    card.dataset.status = statusKey;
+    const wrapper = card.closest('[data-status]');
+    if (wrapper) {
+        wrapper.dataset.status = statusKey;
     }
 }
 
@@ -432,5 +698,34 @@ document.head.appendChild(style);
 
 // Auto-refresh every 60 seconds (increased from 30 for less load)
 setInterval(refreshDashboard, 60000);
+
+// Dashboard filters
+const filterContainer = document.getElementById('dashboard-filters');
+const filterKey = 'pp-dashboard-filter';
+let currentFilter = localStorage.getItem(filterKey) || 'all';
+
+function applyFilter(filter) {
+    const cards = document.querySelectorAll('#printer-grid > [data-status]');
+    cards.forEach(card => {
+        const matches = filter === 'all' || card.dataset.status === filter;
+        card.style.display = matches ? '' : 'none';
+    });
+}
+
+if (filterContainer) {
+    const chips = filterContainer.querySelectorAll('.filter-chip');
+    chips.forEach(chip => {
+        chip.classList.toggle('active', chip.dataset.filter === currentFilter);
+        chip.addEventListener('click', () => {
+            currentFilter = chip.dataset.filter;
+            localStorage.setItem(filterKey, currentFilter);
+            chips.forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            applyFilter(currentFilter);
+        });
+    });
+    applyFilter(currentFilter);
+    refreshCounts();
+}
 </script>
 {% endblock %}

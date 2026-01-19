@@ -49,23 +49,3 @@ Packages are signed with GPG for security verification. The workflow automatical
 1. Signs the `Release` file with a detached signature (`Release.gpg`)
 2. Creates an inline-signed `InRelease` file
 3. Exports the public key to `gpg-key.asc`
-
-## Required Secrets
-
-The GitHub Actions workflow requires these secrets:
-
-- `GPG_PRIVATE_KEY`: The ASCII-armored private GPG key
-- `GPG_PASSPHRASE`: The passphrase for the GPG key
-
-### Generating a GPG Key
-
-```bash
-# Generate a new key (use RSA 4096, no expiration for repo signing)
-gpg --full-generate-key
-
-# Export private key (add to GPG_PRIVATE_KEY secret)
-gpg --armor --export-secret-keys YOUR_KEY_ID
-
-# Export public key (for verification)
-gpg --armor --export YOUR_KEY_ID
-```

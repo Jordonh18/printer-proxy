@@ -142,14 +142,6 @@
         color: var(--danger);
     }
     
-    /* Empty state */
-    .empty-state {
-        padding: 3rem 2rem;
-        text-align: center;
-        color: var(--muted);
-        font-size: 0.875rem;
-    }
-    
     /* Footer note */
     .footer-note {
         font-size: 0.75rem;
@@ -182,7 +174,7 @@
 <div class="detail-card">
     {% if logs %}
     <div class="table-responsive">
-        <table class="modern-table">
+        <table class="modern-table data-table">
             <thead>
                 <tr>
                     <th>Timestamp</th>
@@ -246,8 +238,17 @@
         </table>
     </div>
     {% else %}
-    <div class="empty-state">
-        No audit log entries.
+    <div class="empty-state-modern">
+        <div class="empty-illustration" aria-hidden="true">
+            <svg viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="36" y="28" width="168" height="124" rx="18" fill="var(--background-secondary)" stroke="var(--border)" />
+                <rect x="60" y="54" width="120" height="10" rx="5" fill="var(--border)" />
+                <rect x="60" y="78" width="104" height="10" rx="5" fill="var(--border)" />
+                <rect x="60" y="102" width="88" height="10" rx="5" fill="var(--border)" />
+            </svg>
+        </div>
+        <div class="empty-title">Nothing to review yet</div>
+        <p class="empty-text">Audit activity will appear here as redirects and logins occur across the fleet.</p>
     </div>
     {% endif %}
 </div>
@@ -256,3 +257,4 @@
     Showing last 200 entries. Full logs are stored in <code>/var/log/printer-proxy/</code>
 </p>
 {% endblock %}
+

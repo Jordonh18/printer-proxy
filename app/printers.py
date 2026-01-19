@@ -59,6 +59,15 @@ class PrinterRegistry:
     
     def __init__(self):
         pass  # No initialization needed, all data comes from database
+
+    def has_printers(self) -> bool:
+        """Check if any printers are registered without loading full rows."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM printers LIMIT 1")
+        row = cursor.fetchone()
+        conn.close()
+        return row is not None
     
     def get_all(self) -> List[Printer]:
         """Get all registered printers."""
@@ -121,10 +130,48 @@ class PrinterRegistry:
         # Check for active redirect
         redirect = ActiveRedirect.get_by_source_printer(printer.id)
         is_redirected = redirect is not None
-        
+
         # Check if this printer is a redirect target
         is_target = ActiveRedirect.is_target_in_use(printer.id)
-        
+
+        cached = self._get_cached_status(printer.id) if use_cache else None
+        return self._build_status(printer, redirect, is_target, cached, use_cache)
+    
+    def _get_cached_status(self, printer_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached health status for a printer."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM printer_status_cache WHERE printer_id = ?", (printer_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def _get_cached_statuses(self, printer_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Get cached health statuses for multiple printers in one query."""
+        if not printer_ids:
+            return {}
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        placeholders = ",".join(["?"] * len(printer_ids))
+        cursor.execute(
+            f"SELECT * FROM printer_status_cache WHERE printer_id IN ({placeholders})",
+            printer_ids
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return {row['printer_id']: dict(row) for row in rows}
+
+    def _build_status(
+        self,
+        printer: Printer,
+        redirect: Optional[ActiveRedirect],
+        is_target: bool,
+        cached: Optional[Dict[str, Any]],
+        use_cache: bool
+    ) -> Dict[str, Any]:
+        """Build a normalized status payload for a printer."""
+        is_redirected = redirect is not None
+
         # Get reachability status
         if is_redirected:
             # Redirected printers are considered offline
@@ -132,7 +179,6 @@ class PrinterRegistry:
             tcp_reachable = False
         elif use_cache:
             # Use cached status from background health checks (FAST)
-            cached = self._get_cached_status(printer.id)
             if cached:
                 icmp_reachable = cached.get('icmp_ok', False)
                 tcp_reachable = cached.get('tcp_9100_ok', False)
@@ -144,7 +190,7 @@ class PrinterRegistry:
             # Live check (SLOW - only use for specific operations)
             icmp_reachable = self.check_icmp_reachability(printer.ip)
             tcp_reachable = self.check_tcp_reachability(printer.ip)
-        
+
         return {
             "printer": printer.to_dict(),
             "status": {
@@ -162,22 +208,30 @@ class PrinterRegistry:
             }
         }
     
-    def _get_cached_status(self, printer_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached health status for a printer."""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM printer_status_cache WHERE printer_id = ?", (printer_id,))
-        row = cursor.fetchone()
-        conn.close()
-        return dict(row) if row else None
-    
     def get_all_statuses(self, use_cache: bool = True) -> List[Dict[str, Any]]:
         """Get status for all printers.
         
         Args:
             use_cache: If True, use cached status (fast). If False, do live checks (slow).
         """
-        return [self.get_printer_status(p, use_cache=use_cache) for p in self.get_all()]
+        printers = self.get_all()
+        if not printers:
+            return []
+
+        redirects = ActiveRedirect.get_all()
+        redirects_by_source = {r.source_printer_id: r for r in redirects}
+        targets_in_use = {r.target_printer_id for r in redirects}
+
+        cached_by_id = self._get_cached_statuses([p.id for p in printers]) if use_cache else {}
+
+        statuses = []
+        for printer in printers:
+            redirect = redirects_by_source.get(printer.id)
+            is_target = printer.id in targets_in_use
+            cached = cached_by_id.get(printer.id)
+            statuses.append(self._build_status(printer, redirect, is_target, cached, use_cache))
+
+        return statuses
     
     def get_available_targets(self, exclude_printer_id: str = None, use_cache: bool = True) -> List[Printer]:
         """Get printers that can be used as redirect targets.
@@ -186,23 +240,32 @@ class PrinterRegistry:
             exclude_printer_id: Printer to exclude from results
             use_cache: If True, use cached status (fast). If False, do live checks.
         """
+        printers = self.get_all()
+        if not printers:
+            return []
+
+        redirects = ActiveRedirect.get_all()
+        redirected_sources = {r.source_printer_id for r in redirects}
+        targets_in_use = {r.target_printer_id for r in redirects}
+        cached_by_id = self._get_cached_statuses([p.id for p in printers]) if use_cache else {}
+
         available = []
-        for printer in self.get_all():
+        for printer in printers:
             # Skip the excluded printer
             if exclude_printer_id and printer.id == exclude_printer_id:
                 continue
             
             # Skip printers that are already being redirected
-            if ActiveRedirect.get_by_source_printer(printer.id):
+            if printer.id in redirected_sources:
                 continue
             
             # Skip printers that are already redirect targets
-            if ActiveRedirect.is_target_in_use(printer.id):
+            if printer.id in targets_in_use:
                 continue
             
             # Check if the printer is online (use cache for speed)
             if use_cache:
-                cached = self._get_cached_status(printer.id)
+                cached = cached_by_id.get(printer.id)
                 is_online = cached.get('is_online', False) if cached else False
             else:
                 is_online = self.check_tcp_reachability(printer.ip)

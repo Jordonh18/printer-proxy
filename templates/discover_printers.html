@@ -229,21 +229,6 @@
         color: var(--success-text);
     }
     
-    /* Empty state */
-    .empty-state {
-        padding: 3rem 2rem;
-        text-align: center;
-    }
-    .empty-state-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: var(--foreground);
-        margin-bottom: 0.5rem;
-    }
-    .empty-state-text {
-        color: var(--muted);
-        font-size: 0.875rem;
-    }
 </style>
 {% endblock %}
 
@@ -293,13 +278,15 @@
 
 {% if discovered is not none %}
 <div class="table-toolbar">
-    <span class="table-count">{{ discovered|length }} printer(s) found</span>
+    <div class="table-actions">
+        <span class="table-count">{{ discovered|length }} printer(s) found</span>
+    </div>
 </div>
 
 {% if discovered %}
 <div class="detail-card mb-4">
     <div class="table-responsive">
-        <table class="modern-table">
+        <table class="modern-table data-table">
             <thead>
                 <tr>
                     <th class="col-ip">IP Address</th>
@@ -369,9 +356,17 @@
 </div>
 {% else %}
 <div class="detail-card mb-4">
-    <div class="empty-state">
-        <div class="empty-state-title">No New Printers Found</div>
-        <p class="empty-state-text">All printers already registered, or none responded on this network.</p>
+    <div class="empty-state-modern">
+        <div class="empty-illustration" aria-hidden="true">
+            <svg viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="32" y="36" width="176" height="108" rx="18" fill="var(--background-secondary)" stroke="var(--border)" />
+                <rect x="68" y="24" width="104" height="38" rx="10" fill="var(--card-bg)" stroke="var(--border)" />
+                <rect x="84" y="92" width="72" height="32" rx="8" fill="var(--card-bg)" stroke="var(--border)" />
+                <circle cx="174" cy="108" r="6" fill="var(--muted)" opacity="0.5" />
+            </svg>
+        </div>
+        <div class="empty-title">No new printers found</div>
+        <p class="empty-text">Everything responding on this network is already registered or offline.</p>
     </div>
 </div>
 {% endif %}
@@ -384,6 +379,7 @@ document.getElementById('discoveryForm').addEventListener('submit', function() {
     this.classList.add('discovering');
     document.getElementById('scanBtn').disabled = true;
 });
+
 
 document.querySelectorAll('.import-form').forEach(function(form, idx) {
     form.addEventListener('submit', function(e) {

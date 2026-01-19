@@ -43,6 +43,7 @@
             --card-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
             --table-hover: hsl(210 40% 96%);
             --input-bg: hsl(0 0% 100%);
+            --input-focus: hsl(222.2 47.4% 50%);
             --navbar-bg: hsl(222.2 47.4% 11.2%);
             --navbar-border: hsl(222.2 47.4% 20%);
             --navbar-link: hsl(215 20% 75%);
@@ -79,6 +80,7 @@
             --card-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3);
             --table-hover: hsl(222.2 47.4% 14%);
             --input-bg: hsl(222.2 47.4% 8%);
+            --input-focus: hsl(210 40% 80%);
             --navbar-bg: hsl(222.2 47.4% 8%);
             --navbar-border: hsl(222.2 30% 15%);
             --navbar-link: hsl(215 20% 65%);
@@ -330,6 +332,206 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
         }
+
+        /* Global page header + buttons */
+        .page-header {
+            margin-bottom: 1.5rem;
+        }
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--foreground);
+            margin: 0;
+        }
+        .btn-modern {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            font-size: 0.875rem;
+            transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.15s;
+            text-decoration: none;
+        }
+        .btn-modern:active {
+            transform: translateY(1px);
+        }
+        .btn-primary-modern {
+            background: var(--primary);
+            color: var(--primary-foreground);
+            border: none;
+        }
+        .btn-primary-modern:hover {
+            opacity: 0.9;
+            color: var(--primary-foreground);
+            text-decoration: none;
+        }
+        .btn-outline-modern {
+            background: var(--card-bg);
+            color: var(--foreground);
+            border: 1px solid var(--border);
+        }
+        .btn-outline-modern:hover {
+            background: var(--table-hover);
+            border-color: var(--muted);
+            color: var(--foreground);
+            text-decoration: none;
+        }
+
+        /* Data tables */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .data-table thead {
+            background: var(--background-secondary);
+        }
+        .data-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .data-table tbody tr:nth-child(even) {
+            background: color-mix(in hsl, var(--background-secondary) 55%, transparent);
+        }
+        .table-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .table-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Filter chips */
+        .filter-chips {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .filter-chip {
+            border: 1px solid var(--border);
+            background: var(--card-bg);
+            color: var(--muted);
+            padding: 0.3rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            transition: all 0.15s ease;
+        }
+        .filter-chip.active,
+        .filter-chip:hover {
+            color: var(--foreground);
+            border-color: var(--muted);
+            background: var(--table-hover);
+        }
+
+        /* Empty state */
+        .empty-state-modern {
+            padding: 4rem 1.5rem;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+        .empty-state-modern .empty-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--foreground);
+            margin: 0;
+        }
+        .empty-state-modern .empty-text {
+            color: var(--muted);
+            font-size: 0.9rem;
+            max-width: 520px;
+            margin: 0 auto;
+        }
+        .empty-illustration {
+            width: 200px;
+            height: 150px;
+        }
+        .empty-illustration svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Status strip */
+        .status-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        .status-strip-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 0.85rem 1rem;
+            box-shadow: var(--card-shadow);
+        }
+        .status-strip-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+        .status-strip-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--foreground);
+        }
+
+        /* Skeleton loader */
+        .skeleton {
+            position: relative;
+            overflow: hidden;
+            background: var(--background-secondary);
+        }
+        .skeleton::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            transform: translateX(-100%);
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+            animation: shimmer 1.2s infinite;
+        }
+        [data-theme="dark"] .skeleton::after {
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+        }
+        .skeleton-line {
+            height: 12px;
+            border-radius: 999px;
+        }
+        .skeleton-title {
+            height: 18px;
+            border-radius: 999px;
+        }
+        @keyframes shimmer {
+            100% { transform: translateX(100%); }
+        }
+
+        /* Page transition */
+        .page-fade {
+            animation: page-fade-in 0.2s ease-out;
+        }
+        @keyframes page-fade-in {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Icon consistency */
+        .bi {
+            vertical-align: -0.125em;
+        }
+        .icon-muted {
+            color: var(--muted);
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -354,12 +556,19 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
                     </li>
+                    {% if current_user.role in ['admin', 'operator'] %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('main.manage_printers') }}">Manage</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('main.audit_log') }}">Audit</a>
                     </li>
+                    {% endif %}
+                    {% if current_user.role == 'admin' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.user_management') }}">Users</a>
+                    </li>
+                    {% endif %}
                     {% endif %}
                 </ul>
                 <ul class="navbar-nav">
@@ -374,11 +583,13 @@
                             {{ current_user.username }}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            {% if current_user.role == 'admin' %}
                             <li>
                                 <a class="dropdown-item" href="{{ url_for('main.settings_page') }}">
                                     <i class="bi bi-gear me-2"></i>Settings
                                 </a>
                             </li>
+                            {% endif %}
                             <li>
                                 <a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
                                     <i class="bi bi-key me-2"></i>Change Password
@@ -398,7 +609,7 @@
         </div>
     </nav>
     
-    <main class="container mt-4 mb-4">
+    <main class="container mt-4 mb-4 page-fade">
         {% block content %}{% endblock %}
     </main>
     

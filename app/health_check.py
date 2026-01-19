@@ -247,6 +247,13 @@ class HealthCheckScheduler:
         try:
             registry = get_registry()
             printers = registry.get_all()
+
+            if not printers:
+                # No printers registered; skip network checks
+                logger.debug("Health checks: no printers registered, skipping poll")
+                # Still allow periodic cleanup of old history
+                self._maybe_cleanup()
+                return
             
             for printer in printers:
                 if not self._running:

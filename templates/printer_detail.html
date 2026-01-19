@@ -328,6 +328,48 @@
     .health-critical {
         color: var(--danger);
     }
+
+    /* Status timeline */
+    .timeline {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .timeline-item {
+        display: flex;
+        gap: 0.75rem;
+        padding: 0.75rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .timeline-item:last-child {
+        border-bottom: none;
+    }
+    .timeline-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        margin-top: 0.35rem;
+        background: var(--muted);
+        flex-shrink: 0;
+    }
+    .timeline-dot.online {
+        background: var(--success);
+    }
+    .timeline-dot.offline {
+        background: var(--danger);
+    }
+    .timeline-dot.redirected {
+        background: var(--warning);
+    }
+    .timeline-title {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--foreground);
+    }
+    .timeline-meta {
+        font-size: 0.75rem;
+        color: var(--muted);
+    }
 </style>
 {% endblock %}
 
@@ -337,6 +379,20 @@
     <span class="separator">/</span>
     <span class="active">{{ printer.name }}</span>
 </nav>
+
+<div class="page-header d-flex justify-content-between align-items-center">
+    <h1 class="page-title">{{ printer.name }}</h1>
+    <div class="d-flex gap-2">
+        {% if current_user.role == 'admin' %}
+        <a href="{{ url_for('main.edit_printer', printer_id=printer.id) }}" class="btn-modern btn-outline-modern">
+            Edit Printer
+        </a>
+        {% endif %}
+        <a href="{{ url_for('main.printer_queue', printer_id=printer.id) }}" class="btn-modern btn-primary-modern">
+            View Queue
+        </a>
+    </div>
+</div>
 
 <!-- Quick links to sub-pages -->
 <div class="quick-links">
@@ -454,10 +510,13 @@
             </div>
             <div class="detail-card-body" id="stats-content">
                 <div class="text-center py-4" id="stats-loading">
-                    <div class="spinner-border spinner-border-sm text-muted" role="status">
-                        <span class="visually-hidden">Loading...</span>
+                    <div class="d-grid gap-2" style="max-width: 360px; margin: 0 auto;">
+                        <div class="skeleton skeleton-title" style="width: 60%;"></div>
+                        <div class="skeleton skeleton-line" style="width: 100%;"></div>
+                        <div class="skeleton skeleton-line" style="width: 80%;"></div>
+                        <div class="skeleton skeleton-line" style="width: 90%;"></div>
                     </div>
-                    <div class="mt-2 text-muted" style="font-size: 0.875rem;">Loading printer statistics...</div>
+                    <div class="mt-3 text-muted" style="font-size: 0.85rem;">Loading printer statistics...</div>
                 </div>
                 <div id="stats-data" style="display: none;"></div>
                 <div id="stats-error" style="display: none;" class="text-center py-4 text-muted" style="font-size: 0.875rem;">
@@ -467,7 +526,7 @@
         </div>
         
         <!-- Redirect Actions -->
-        {% if not status.status.is_redirected and not status.status.is_redirect_target %}
+        {% if not status.status.is_redirected and not status.status.is_redirect_target and current_user.role in ['admin', 'operator'] %}
         <div class="action-card danger mb-4">
             <div class="action-header">
                 Create Redirect
@@ -497,6 +556,9 @@
                             </option>
                             {% endfor %}
                         </select>
+                        <div class="text-muted" style="font-size: 0.75rem; margin-top: 0.4rem;">
+                            Choose a healthy target to keep print traffic flowing without changing client IPs.
+                        </div>
                     </div>
                     
                     <button type="submit" class="btn-action btn-danger-solid">
@@ -510,7 +572,7 @@
                 {% endif %}
             </div>
         </div>
-        {% elif status.status.is_redirected %}
+        {% elif status.status.is_redirected and current_user.role in ['admin', 'operator'] %}
         <div class="action-card warning mb-4">
             <div class="action-header">
                 Remove Redirect
@@ -525,7 +587,7 @@
                 </form>
             </div>
         </div>
-        {% elif status.status.is_redirect_target %}
+        {% elif status.status.is_redirect_target and current_user.role in ['admin', 'operator'] %}
         <div class="redirect-alert" style="background: var(--info-bg); border-color: var(--info);">
             <div class="redirect-alert-title" style="color: var(--info-text);">Redirect Target</div>
             <div style="font-size: 0.875rem; color: var(--info-text);">
@@ -537,6 +599,47 @@
     
     <!-- Sidebar -->
     <div class="col-lg-4">
+        <div class="detail-card mb-4">
+            <div class="detail-card-header">Status Timeline</div>
+            <ul class="timeline">
+                {% if status.status.is_redirected %}
+                <li class="timeline-item">
+                    <span class="timeline-dot redirected"></span>
+                    <div>
+                        <div class="timeline-title">Redirect enabled to {{ status.status.redirect_info.target_printer_id }}</div>
+                        <div class="timeline-meta">{{ status.status.redirect_info.enabled_at }} · {{ status.status.redirect_info.enabled_by }}</div>
+                    </div>
+                </li>
+                {% endif %}
+                {% if health_history %}
+                    {% for entry in health_history[:6] %}
+                    <li class="timeline-item">
+                        <span class="timeline-dot {{ 'online' if entry.is_online else 'offline' }}"></span>
+                        <div>
+                            <div class="timeline-title">{{ 'Online check passed' if entry.is_online else 'Offline check detected' }}</div>
+                            <div class="timeline-meta">
+                                {% if entry.checked_at is string %}
+                                    {{ entry.checked_at[:16] }}
+                                {% else %}
+                                    {{ entry.checked_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% endif %}
+                                {% if entry.response_time_ms %} · {{ entry.response_time_ms|round(0) }} ms{% endif %}
+                            </div>
+                        </div>
+                    </li>
+                    {% endfor %}
+                {% else %}
+                <li class="timeline-item">
+                    <span class="timeline-dot"></span>
+                    <div>
+                        <div class="timeline-title">No recent checks</div>
+                        <div class="timeline-meta">Health monitoring will appear here as checks run.</div>
+                    </div>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+
         <!-- Audit History -->
         <div class="detail-card">
             <div class="detail-card-header">

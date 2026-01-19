@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Redirect Statistics{% endblock %}
+{% block title %}Redirect Statistics - Printer Proxy{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -11,16 +11,16 @@
     .page-title {
         font-size: 1.5rem;
         font-weight: 600;
-        color: hsl(222.2 47.4% 11.2%);
+        color: var(--foreground);
         margin: 0;
     }
     
     /* Stat cards */
     .stat-card {
-        background: hsl(0 0% 100%);
-        border: 1px solid hsl(214.3 31.8% 91.4%);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
         border-radius: 0.75rem;
-        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+        box-shadow: var(--card-shadow);
         padding: 1.25rem;
         text-align: center;
         height: 100%;
@@ -39,29 +39,32 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        color: hsl(215.4 16.3% 46.9%);
+        color: var(--muted);
     }
-    .stat-primary { color: hsl(222.2 47.4% 40%); }
-    .stat-success { color: hsl(142 76% 36%); }
-    .stat-info { color: hsl(214 95% 40%); }
-    .stat-warning { color: hsl(38 92% 40%); }
-    .stat-secondary { color: hsl(215.4 16.3% 46.9%); }
-    .stat-danger { color: hsl(0 84% 50%); }
+    .stat-primary { color: var(--primary); }
+    .stat-success { color: var(--success); }
+    .stat-info { color: var(--info); }
+    .stat-warning { color: var(--warning); }
+    .stat-secondary { color: var(--muted); }
+    .stat-danger { color: var(--danger); }
     
     /* Detail card */
     .detail-card {
-        background: hsl(0 0% 100%);
-        border: 1px solid hsl(214.3 31.8% 91.4%);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
         border-radius: 0.75rem;
-        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+        box-shadow: var(--card-shadow);
         overflow: hidden;
     }
     .detail-card-header {
         padding: 1rem 1.25rem;
-        border-bottom: 1px solid hsl(214.3 31.8% 91.4%);
+        border-bottom: 1px solid var(--border);
         font-weight: 600;
         font-size: 1rem;
-        color: hsl(222.2 47.4% 11.2%);
+        color: var(--foreground);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
     }
     
     /* Table styling */
@@ -70,7 +73,7 @@
         border-collapse: collapse;
     }
     .modern-table thead {
-        background: hsl(0 0% 100%);
+        background: var(--background-secondary);
     }
     .modern-table th {
         padding: 0.5rem 0.75rem;
@@ -78,26 +81,26 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        color: hsl(215.4 16.3% 46.9%);
-        border-bottom: 1px solid hsl(214.3 31.8% 91.4%);
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
         white-space: nowrap;
     }
     .modern-table td {
         padding: 0.5rem 0.75rem;
         font-size: 0.8rem;
-        color: hsl(222.2 47.4% 11.2%);
-        border-bottom: 1px solid hsl(214.3 31.8% 94%);
+        color: var(--foreground);
+        border-bottom: 1px solid var(--border);
         vertical-align: middle;
     }
     .modern-table tbody tr:hover {
-        background: hsl(210 40% 98%);
+        background: var(--table-hover);
     }
     .modern-table tbody tr:last-child td {
         border-bottom: none;
     }
     
     .modern-table .text-muted-custom {
-        color: hsl(215.4 16.3% 56.9%);
+        color: var(--muted);
         font-size: 0.7rem;
     }
     .modern-table .fw-medium {
@@ -112,24 +115,11 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.025em;
-        background: hsl(142 76% 90%);
-        color: hsl(142 76% 25%);
+        background: var(--success-bg);
+        color: var(--success-text);
     }
     
     /* Empty state */
-    .empty-state {
-        padding: 3rem 2rem;
-        text-align: center;
-    }
-    .empty-state-title {
-        font-size: 0.875rem;
-        color: hsl(215.4 16.3% 46.9%);
-        margin-bottom: 0.5rem;
-    }
-    .empty-state-text {
-        color: hsl(215.4 16.3% 56.9%);
-        font-size: 0.8rem;
-    }
 </style>
 {% endblock %}
 
@@ -187,11 +177,11 @@
 <!-- Redirect History -->
 <div class="detail-card">
     <div class="detail-card-header">
-        Redirect History
+        <span>Redirect History</span>
     </div>
     {% if history %}
     <div class="table-responsive">
-        <table class="modern-table">
+        <table class="modern-table data-table">
             <thead>
                 <tr>
                     <th>Source Printer</th>
@@ -253,9 +243,17 @@
         </table>
     </div>
     {% else %}
-    <div class="empty-state">
-        <div class="empty-state-title">No redirect history yet.</div>
-        <p class="empty-state-text">Completed redirects will appear here.</p>
+    <div class="empty-state-modern">
+        <div class="empty-illustration" aria-hidden="true">
+            <svg viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="36" y="28" width="168" height="124" rx="18" fill="var(--background-secondary)" stroke="var(--border)" />
+                <rect x="60" y="56" width="120" height="10" rx="5" fill="var(--border)" />
+                <rect x="60" y="80" width="108" height="10" rx="5" fill="var(--border)" />
+                <rect x="60" y="104" width="92" height="10" rx="5" fill="var(--border)" />
+            </svg>
+        </div>
+        <div class="empty-title">No redirect history yet</div>
+        <p class="empty-text">Completed redirects will appear here once enabled and disabled.</p>
     </div>
     {% endif %}
 </div>

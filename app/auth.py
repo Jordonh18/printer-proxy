@@ -6,7 +6,9 @@ import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
-from flask_login import LoginManager
+from functools import wraps
+from flask import abort, jsonify, request
+from flask_login import LoginManager, current_user
 
 from config.config import (
     MIN_PASSWORD_LENGTH,
@@ -163,7 +165,7 @@ def create_initial_admin(username: str, password: str) -> Tuple[bool, str]:
     
     # Create user
     password_hash = hash_password(password)
-    User.create(username, password_hash)
+    User.create(username, password_hash, role='admin')
     
     AuditLog.log(
         username="SYSTEM",
@@ -173,3 +175,18 @@ def create_initial_admin(username: str, password: str) -> Tuple[bool, str]:
     )
     
     return True, "Admin user created successfully"
+
+
+def role_required(*roles):
+    """Require the current user to have one of the specified roles."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            user_role = getattr(current_user, 'role', None)
+            if user_role not in roles:
+                if request.path.startswith('/api'):
+                    return jsonify({'error': 'Forbidden'}), 403
+                abort(403)
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator

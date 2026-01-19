@@ -29,6 +29,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'admin',
             is_active BOOLEAN DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP,
@@ -36,6 +37,13 @@ def init_db():
             locked_until TIMESTAMP
         )
     """)
+
+    # Ensure role column exists for older installs
+    cursor.execute("PRAGMA table_info(users)")
+    user_columns = {row['name'] for row in cursor.fetchall()}
+    if 'role' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'")
+        cursor.execute("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''")
     
     # Active redirects table
     cursor.execute("""
@@ -181,12 +189,13 @@ def init_db():
 class User:
     """User model for authentication."""
     
-    def __init__(self, id: int, username: str, password_hash: str,
+    def __init__(self, id: int, username: str, password_hash: str, role: str = 'admin',
                  is_active: bool = True, last_login: Optional[datetime] = None,
                  failed_attempts: int = 0, locked_until: Optional[datetime] = None):
         self.id = id
         self.username = username
         self.password_hash = password_hash
+        self.role = role or 'admin'
         self.is_active = is_active
         self.last_login = last_login
         self.failed_attempts = failed_attempts
@@ -202,6 +211,18 @@ class User:
     
     def get_id(self):
         return str(self.id)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == 'admin'
+
+    @property
+    def is_operator(self) -> bool:
+        return self.role == 'operator'
+
+    @property
+    def is_viewer(self) -> bool:
+        return self.role == 'viewer'
     
     @staticmethod
     def get_by_id(user_id: int) -> Optional['User']:
@@ -217,6 +238,7 @@ class User:
                 id=row['id'],
                 username=row['username'],
                 password_hash=row['password_hash'],
+                role=row['role'] if 'role' in row.keys() else 'admin',
                 is_active=bool(row['is_active']),
                 last_login=row['last_login'],
                 failed_attempts=row['failed_attempts'],
@@ -238,6 +260,7 @@ class User:
                 id=row['id'],
                 username=row['username'],
                 password_hash=row['password_hash'],
+                role=row['role'] if 'role' in row.keys() else 'admin',
                 is_active=bool(row['is_active']),
                 last_login=row['last_login'],
                 failed_attempts=row['failed_attempts'],
@@ -246,19 +269,63 @@ class User:
         return None
     
     @staticmethod
-    def create(username: str, password_hash: str) -> 'User':
+    def create(username: str, password_hash: str, role: str = 'admin', is_active: bool = True) -> 'User':
         """Create a new user."""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, password_hash)
+            "INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)",
+            (username, password_hash, role, int(is_active))
         )
         conn.commit()
         user_id = cursor.lastrowid
         conn.close()
         
-        return User(id=user_id, username=username, password_hash=password_hash)
+        return User(id=user_id, username=username, password_hash=password_hash, role=role, is_active=is_active)
+
+    @staticmethod
+    def get_all() -> List['User']:
+        """Get all users."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users ORDER BY username ASC")
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [User(
+            id=row['id'],
+            username=row['username'],
+            password_hash=row['password_hash'],
+            role=row['role'] if 'role' in row.keys() else 'admin',
+            is_active=bool(row['is_active']),
+            last_login=row['last_login'],
+            failed_attempts=row['failed_attempts'],
+            locked_until=row['locked_until']
+        ) for row in rows]
+
+    def update_role(self, role: str):
+        """Update user's role."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET role = ? WHERE id = ?",
+            (role, self.id)
+        )
+        conn.commit()
+        conn.close()
+        self.role = role
+
+    def set_active(self, is_active: bool):
+        """Enable or disable user account."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET is_active = ? WHERE id = ?",
+            (int(is_active), self.id)
+        )
+        conn.commit()
+        conn.close()
+        self.is_active = is_active
     
     def update_last_login(self):
         """Update last login timestamp."""
