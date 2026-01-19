@@ -1,0 +1,45 @@
+Source: printer-proxy
+Section: net
+Priority: optional
+Maintainer: Jordon Harrison <jordonh18@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13),
+               dh-python,
+               python3,
+               python3-setuptools
+Standards-Version: 4.6.2
+Homepage: https://github.com/Jordonh18/printer-proxy
+Vcs-Browser: https://github.com/Jordonh18/printer-proxy
+Vcs-Git: https://github.com/Jordonh18/printer-proxy.git
+Rules-Requires-Root: no
+
+Package: printer-proxy
+Architecture: all
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         python3 (>= 3.9),
+         python3-venv,
+         python3-pip,
+         adduser,
+         gunicorn,
+         iptables,
+         iproute2,
+         iputils-ping,
+         arping,
+         nginx,
+         openssl
+Recommends: snmp
+Suggests: ufw
+Description: Web-based network printer traffic redirection tool
+ Printer Proxy is a web application that redirects network print traffic
+ from one printer IP address to another using NAT/iptables rules. This
+ allows print clients to continue using the same IP address when a printer
+ fails, while traffic is transparently forwarded to a working backup printer.
+ .
+ Features:
+  * Web-based management interface with printer discovery
+  * Automatic network configuration detection
+  * Password-protected access with account lockout protection
+  * Full audit logging of all configuration changes
+  * Support for TCP 9100 (RAW/JetDirect) printing protocol
+  * Printer health monitoring with SNMP and ICMP checks
+  * Self-update capability from GitHub releases

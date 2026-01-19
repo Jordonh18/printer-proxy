@@ -1,0 +1,25 @@
+printer-proxy for Debian
+------------------------
+
+First-time setup:
+  After installation, access the web interface at https://your-server-ip/
+  You will be prompted to create an admin account on first access.
+
+Adding printers:
+  Navigate to Manage Printers -> Add Printer, or use the Discover
+  Printers feature to automatically find network printers.
+
+Creating redirects:
+  When a printer fails, create a redirect from the failed printer's
+  IP to a working backup printer. Print clients will continue to
+  send jobs to the original IP, but traffic will be forwarded.
+
+Logs:
+  Application logs: /var/log/printer-proxy/
+  Nginx access logs: /var/log/nginx/printer-proxy-access.log
+
+Configuration:
+  The application stores its configuration in /var/lib/printer-proxy/
+  No manual configuration file editing is required.
+
+ -- Jordon Harrison <jordonh18@users.noreply.github.com>  Sun, 19 Jan 2026 12:00:00 +0000

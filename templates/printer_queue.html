@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+
+{% block title %}{{ printer.name }} - Print Queue{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Breadcrumb */
+    .breadcrumb-modern {
+        background: none;
+        padding: 0;
+        margin-bottom: 1.5rem;
+    }
+    .breadcrumb-modern a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.875rem;
+    }
+    .breadcrumb-modern a:hover {
+        color: var(--foreground);
+    }
+    .breadcrumb-modern .active {
+        color: var(--foreground);
+        font-weight: 500;
+    }
+    .breadcrumb-modern .separator {
+        color: var(--border);
+        margin: 0 0.5rem;
+    }
+    
+    /* Live indicator */
+    .live-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--success-text);
+        background: var(--success-bg);
+        border-radius: 0.25rem;
+    }
+    .live-indicator::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        background: currentColor;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    /* Table card */
+    .table-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+    }
+    .table-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .table-card-header h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin: 0;
+    }
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    
+    /* Queue table */
+    .queue-table {
+        width: 100%;
+        font-size: 0.875rem;
+    }
+    .queue-table th {
+        text-align: left;
+        padding: 0.75rem 1rem;
+        font-weight: 600;
+        color: var(--muted);
+        background: var(--background-secondary);
+        border-bottom: 1px solid var(--border);
+    }
+    .queue-table td {
+        padding: 0.75rem 1rem;
+        color: var(--foreground);
+        border-bottom: 1px solid var(--border);
+    }
+    .queue-table tr:last-child td {
+        border-bottom: none;
+    }
+    .queue-table tr:hover td {
+        background: var(--table-hover);
+    }
+    
+    /* Status pills */
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.625rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    .status-processing {
+        background: hsl(214 95% 90%);
+        color: hsl(214 95% 30%);
+    }
+    [data-theme="dark"] .status-processing {
+        background: hsl(214 70% 25%);
+        color: hsl(214 95% 80%);
+    }
+    .status-pending {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+    }
+    .status-completed {
+        background: var(--success-bg);
+        color: var(--success-text);
+    }
+    .status-canceled, .status-aborted {
+        background: var(--danger-bg);
+        color: var(--danger-text);
+    }
+    
+    /* Empty state */
+    .empty-state {
+        padding: 3rem 2rem;
+        text-align: center;
+        color: var(--muted);
+    }
+    .empty-state i {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+    .empty-state h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin-bottom: 0.5rem;
+    }
+    
+    .text-muted {
+        color: var(--muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb-modern">
+    <a href="{{ url_for('main.dashboard') }}">Dashboard</a>
+    <span class="separator">/</span>
+    <a href="{{ url_for('main.printer_detail', printer_id=printer.id) }}">{{ printer.name }}</a>
+    <span class="separator">/</span>
+    <span class="active">Print Queue</span>
+</nav>
+
+<div class="table-card">
+    <div class="table-card-header">
+        <div class="header-left">
+            <h2>Print Queue</h2>
+            <span class="live-indicator">LIVE</span>
+        </div>
+        <span class="text-muted" id="queue-count">{{ queue|length }} job(s)</span>
+    </div>
+    <div id="queue-container">
+        {% if queue %}
+        <table class="queue-table">
+            <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Name</th>
+                    <th>Owner</th>
+                    <th>Pages</th>
+                    <th>Status</th>
+                    <th>Submitted</th>
+                </tr>
+            </thead>
+            <tbody id="queue-body">
+                {% for job in queue %}
+                <tr>
+                    <td>#{{ job.job_id }}</td>
+                    <td>{{ job.name or 'Unknown' }}</td>
+                    <td>{{ job.owner or 'Unknown' }}</td>
+                    <td>{{ job.pages }}</td>
+                    <td>
+                        <span class="status-pill status-{{ job.status|lower|replace(' ', '-') }}">
+                            {{ job.status }}
+                        </span>
+                    </td>
+                    <td class="text-muted">
+                        {% if job.submitted_at %}
+                            {{ job.submitted_at.strftime('%H:%M:%S') }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <i class="bi bi-printer"></i>
+            <h3>No active print job</h3>
+            <p>The printer is not currently printing</p>
+            <small class="text-muted d-block mt-2">
+                Jobs appear here only while actively printing.<br>
+                See Job History for past print jobs.
+            </small>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const printerId = {{ printer.id }};
+    let evtSource = null;
+    
+    function initSSE() {
+        if (evtSource) {
+            evtSource.close();
+        }
+        
+        evtSource = new EventSource(`/api/sse/printer/${printerId}/queue`);
+        
+        evtSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.queue) {
+                updateQueue(data.queue);
+            }
+        };
+        
+        evtSource.onerror = function(err) {
+            console.error('SSE Error:', err);
+            setTimeout(() => initSSE(), 5000);
+        };
+    }
+    
+    function updateQueue(queue) {
+        const container = document.getElementById('queue-container');
+        const countEl = document.getElementById('queue-count');
+        
+        countEl.textContent = queue.length + ' job(s)';
+        
+        if (queue.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="bi bi-printer"></i>
+                    <h3>No active print job</h3>
+                    <p>The printer is not currently printing</p>
+                    <small class="text-muted d-block mt-2">
+                        Jobs appear here only while actively printing.<br>
+                        See Job History for past print jobs.
+                    </small>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = `
+            <table class="queue-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Name</th>
+                        <th>Owner</th>
+                        <th>Pages</th>
+                        <th>Status</th>
+                        <th>Submitted</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        queue.forEach(job => {
+            const statusClass = job.status.toLowerCase().replace(' ', '-');
+            const submitted = job.submitted_at ? new Date(job.submitted_at).toLocaleTimeString() : '—';
+            html += `
+                <tr>
+                    <td>#${job.job_id}</td>
+                    <td>${job.name || 'Unknown'}</td>
+                    <td>${job.owner || 'Unknown'}</td>
+                    <td>${job.pages}</td>
+                    <td><span class="status-pill status-${statusClass}">${job.status}</span></td>
+                    <td class="text-muted">${submitted}</td>
+                </tr>
+            `;
+        });
+        
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+    
+    initSSE();
+    
+    window.addEventListener('beforeunload', () => {
+        if (evtSource) {
+            evtSource.close();
+        }
+    });
+</script>
+{% endblock %}

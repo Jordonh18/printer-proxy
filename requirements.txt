@@ -1,0 +1,11 @@
+flask==3.0.0
+flask-login==0.6.3
+flask-wtf==1.2.1
+werkzeug==3.0.1
+python-dotenv==1.0.0
+gunicorn==21.2.0
+bcrypt==4.1.2
+
+# Printer Discovery
+zeroconf==0.131.0
+pysnmp>=7.0.0

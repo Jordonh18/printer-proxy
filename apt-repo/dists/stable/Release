@@ -1,0 +1,14 @@
+Origin: Printer Proxy
+Label: Printer Proxy
+Suite: stable
+Codename: stable
+Date: Mon, 19 Jan 2026 09:13:21 +0000
+Architectures: all
+Components: main
+Description: Printer Proxy APT Repository
+MD5Sum:
+ 0d0b6460db0bf57243ca8cacf34bd0f7 791 main/binary-all/Packages
+ 50f17c4f844e9986fec454b75344d6cb 540 main/binary-all/Packages.gz
+SHA256:
+ befd8f762b5b1c5bc6a04fda4d750adb942b1d9d0995aaef804ba15f59fd3e27 791 main/binary-all/Packages
+ 1e09f1cb4be06488f1617139bd3786c0160b2378d0bd77130c0e379b4362375a 540 main/binary-all/Packages.gz

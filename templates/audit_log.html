@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Log - Printer Proxy{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Page header */
+    .page-header {
+        margin-bottom: 1.5rem;
+    }
+    .page-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin: 0;
+    }
+    
+    /* Buttons */
+    .btn-modern {
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        font-size: 0.875rem;
+        transition: all 0.15s;
+        text-decoration: none;
+    }
+    .btn-outline-modern {
+        background: var(--card-bg);
+        color: var(--foreground);
+        border: 1px solid var(--border);
+    }
+    .btn-outline-modern:hover {
+        background: var(--table-hover);
+        border-color: var(--muted);
+        color: var(--foreground);
+        text-decoration: none;
+    }
+    
+    /* Cards */
+    .detail-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+    }
+    
+    /* Table styling */
+    .modern-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .modern-table thead {
+        background: var(--background-secondary);
+    }
+    .modern-table th {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+    }
+    .modern-table td {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        color: var(--foreground);
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+    }
+    .modern-table tbody tr:hover {
+        background: var(--table-hover);
+    }
+    .modern-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    .modern-table tbody tr.row-error {
+        background: var(--danger-bg);
+    }
+    .modern-table tbody tr.row-error:hover {
+        background: var(--danger-bg);
+        opacity: 0.9;
+    }
+    
+    .modern-table code {
+        background: var(--background-secondary);
+        padding: 0.1rem 0.3rem;
+        border-radius: 0.2rem;
+        font-size: 0.7rem;
+        color: var(--foreground);
+    }
+    .modern-table a {
+        color: var(--primary);
+        text-decoration: none;
+    }
+    .modern-table a:hover {
+        opacity: 0.8;
+        text-decoration: underline;
+    }
+    
+    /* Action pills */
+    .action-pill {
+        padding: 0.15rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+    .action-enabled {
+        background: var(--success-bg);
+        color: var(--success-text);
+    }
+    .action-disabled {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+    }
+    .action-failed {
+        background: var(--danger-bg);
+        color: var(--danger-text);
+    }
+    .action-login {
+        background: var(--info-bg);
+        color: var(--info-text);
+    }
+    .action-logout {
+        background: var(--muted-bg);
+        color: var(--muted);
+    }
+    .action-default {
+        background: var(--background-secondary);
+        color: var(--muted);
+    }
+    
+    /* Status indicators */
+    .status-ok {
+        color: var(--success);
+    }
+    .status-fail {
+        color: var(--danger);
+    }
+    
+    /* Empty state */
+    .empty-state {
+        padding: 3rem 2rem;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.875rem;
+    }
+    
+    /* Footer note */
+    .footer-note {
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin-top: 1rem;
+    }
+    .footer-note code {
+        background: var(--background-secondary);
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.25rem;
+        font-size: 0.7rem;
+        color: var(--foreground);
+    }
+    
+    /* Muted text for empty cells */
+    .text-muted-dash {
+        color: var(--muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center">
+    <h1 class="page-title">Audit Log</h1>
+    <button class="btn-modern btn-outline-modern" onclick="location.reload()">
+        Refresh
+    </button>
+</div>
+
+<div class="detail-card">
+    {% if logs %}
+    <div class="table-responsive">
+        <table class="modern-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Source</th>
+                    <th>Target</th>
+                    <th>Details</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr class="{% if not log.success %}row-error{% endif %}">
+                    <td>{{ log.timestamp }}</td>
+                    <td>{{ log.username }}</td>
+                    <td>
+                        {% if 'REDIRECT_ENABLED' in log.action %}
+                            <span class="action-pill action-enabled">Enabled</span>
+                        {% elif 'REDIRECT_DISABLED' in log.action %}
+                            <span class="action-pill action-disabled">Disabled</span>
+                        {% elif 'FAILED' in log.action %}
+                            <span class="action-pill action-failed">Failed</span>
+                        {% elif 'LOGIN' in log.action %}
+                            <span class="action-pill action-login">{{ log.action }}</span>
+                        {% elif 'LOGOUT' in log.action %}
+                            <span class="action-pill action-logout">Logout</span>
+                        {% else %}
+                            <span class="action-pill action-default">{{ log.action }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.source_printer_id %}
+                            <a href="{{ url_for('main.printer_detail', printer_id=log.source_printer_id) }}">
+                                <code>{{ log.source_ip or log.source_printer_id }}</code>
+                            </a>
+                        {% else %}
+                            <span class="text-muted-dash">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.target_printer_id %}
+                            <a href="{{ url_for('main.printer_detail', printer_id=log.target_printer_id) }}">
+                                <code>{{ log.target_ip or log.target_printer_id }}</code>
+                            </a>
+                        {% else %}
+                            <span class="text-muted-dash">—</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ log.details or '—' }}</td>
+                    <td>
+                        {% if log.success %}
+                            <span class="status-ok">●</span>
+                        {% else %}
+                            <span class="status-fail" title="{{ log.error_message }}">●</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        No audit log entries.
+    </div>
+    {% endif %}
+</div>
+
+<p class="footer-note">
+    Showing last 200 entries. Full logs are stored in <code>/var/log/printer-proxy/</code>
+</p>
+{% endblock %}

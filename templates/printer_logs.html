@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}{{ printer.name }} - Logs{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Breadcrumb */
+    .breadcrumb-modern {
+        background: none;
+        padding: 0;
+        margin-bottom: 1rem;
+    }
+    .breadcrumb-modern a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.8rem;
+    }
+    .breadcrumb-modern a:hover {
+        color: var(--foreground);
+    }
+    .breadcrumb-modern .active {
+        color: var(--foreground);
+        font-weight: 500;
+    }
+    .breadcrumb-modern .separator {
+        color: var(--border);
+        margin: 0 0.5rem;
+    }
+    
+    /* Page header */
+    .page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+    }
+    .page-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin: 0;
+    }
+    
+    /* Buttons */
+    .btn-modern {
+        padding: 0.4rem 0.75rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        font-size: 0.8rem;
+        transition: all 0.15s;
+        text-decoration: none;
+        border: 1px solid var(--border);
+        background: var(--card-bg);
+        color: var(--foreground);
+        cursor: pointer;
+    }
+    .btn-modern:hover {
+        background: var(--background-secondary);
+        text-decoration: none;
+        color: var(--foreground);
+    }
+    
+    /* Card */
+    .detail-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+    }
+    
+    /* Compact table */
+    .modern-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .modern-table thead {
+        background: var(--background-secondary);
+    }
+    .modern-table th {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+        text-align: left;
+    }
+    .modern-table td {
+        padding: 0.4rem 0.75rem;
+        font-size: 0.8rem;
+        color: var(--foreground);
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+    }
+    .modern-table tbody tr:hover {
+        background: var(--table-hover);
+    }
+    .modern-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+    .modern-table code {
+        background: var(--background-secondary);
+        padding: 0.1rem 0.3rem;
+        border-radius: 0.2rem;
+        font-size: 0.7rem;
+        color: var(--foreground);
+    }
+    
+    /* Severity pills */
+    .severity-pill {
+        padding: 0.15rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+        display: inline-block;
+    }
+    .severity-critical {
+        background: hsl(0 84% 92%);
+        color: hsl(0 84% 35%);
+    }
+    .severity-error {
+        background: hsl(0 84% 92%);
+        color: hsl(0 84% 35%);
+    }
+    .severity-warning {
+        background: hsl(48 96% 85%);
+        color: hsl(25 95% 25%);
+    }
+    .severity-info {
+        background: hsl(214 95% 90%);
+        color: hsl(214 95% 30%);
+    }
+    .severity-other {
+        background: hsl(210 40% 94%);
+        color: hsl(215.4 16.3% 40%);
+    }
+    
+    /* Empty state */
+    .empty-state {
+        padding: 3rem 2rem;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.875rem;
+    }
+    .empty-state i {
+        font-size: 2rem;
+        opacity: 0.5;
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Footer */
+    .footer-note {
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin-top: 0.75rem;
+    }
+    
+    .text-muted {
+        color: var(--muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb-modern">
+    <a href="{{ url_for('main.dashboard') }}">Dashboard</a>
+    <span class="separator">/</span>
+    <a href="{{ url_for('main.printer_detail', printer_id=printer.id) }}">{{ printer.name }}</a>
+    <span class="separator">/</span>
+    <span class="active">Logs</span>
+</nav>
+
+<div class="page-header">
+    <h1 class="page-title">Printer Logs</h1>
+    <button class="btn-modern" onclick="location.reload()">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+</div>
+
+<div class="detail-card">
+    {% if logs %}
+    <div class="table-responsive">
+        <table class="modern-table">
+            <thead>
+                <tr>
+                    <th>Severity</th>
+                    <th>Code</th>
+                    <th>Event</th>
+                    <th>Details</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>
+                        <span class="severity-pill severity-{{ log.severity|lower }}">{{ log.severity }}</span>
+                    </td>
+                    <td><code>{{ log.code }}</code></td>
+                    <td>{{ log.message }}</td>
+                    <td class="text-muted">{{ log.description }}</td>
+                    <td class="text-muted">{{ log.time_display or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-check-circle"></i>
+        <strong>No Active Logs</strong><br>
+        The printer is operating normally.
+    </div>
+    {% endif %}
+</div>
+
+<p class="footer-note">
+    Showing {{ logs|length }} log entr{{ 'ies' if logs|length != 1 else 'y' }} from printer SNMP event log.
+</p>
+{% endblock %}

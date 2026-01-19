@@ -1,0 +1,282 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '.github/copilot-instructions.md'
+      - 'LICENSE'
+      - '*.md'
+      - '.gitignore'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check-changes:
+    name: Check for Release-Worthy Changes
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      new_version: ${{ steps.version.outputs.new_version }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get current version
+        id: current
+        run: |
+          VERSION=$(python3 -c "exec(open('app/version.py').read()); print(__version__)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+      
+      - name: Check if release exists for current version
+        id: check
+        run: |
+          VERSION="${{ steps.current.outputs.version }}"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${VERSION}")
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "Release v$VERSION already exists"
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "Will create release v$VERSION"
+          fi
+      
+      - name: Set version output
+        id: version
+        run: echo "new_version=${{ steps.current.outputs.version }}" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: check-changes
+    if: needs.check-changes.outputs.should_release == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot gzip
+      
+      - name: Build .deb package
+        run: |
+          chmod +x scripts/build-deb.sh
+          ./scripts/build-deb.sh
+      
+      - name: Verify package
+        run: |
+          VERSION="${{ needs.check-changes.outputs.new_version }}"
+          DEB_FILE="builds/printer-proxy_${VERSION}_all.deb"
+          
+          if [ ! -f "$DEB_FILE" ]; then
+            echo "ERROR: Package not built"
+            exit 1
+          fi
+          
+          dpkg-deb --info "$DEB_FILE"
+          cd builds && sha256sum -c "printer-proxy_${VERSION}_all.deb.sha256"
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: |
+            builds/*.deb
+            builds/*.sha256
+          retention-days: 7
+
+  test:
+    name: Test Installation
+    runs-on: ubuntu-latest
+    needs: [check-changes, build]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-package
+          path: builds/
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-venv python3-pip \
+            iptables iproute2 iputils-ping arping nginx openssl
+      
+      - name: Test installation
+        run: |
+          VERSION="${{ needs.check-changes.outputs.new_version }}"
+          sudo dpkg -i "builds/printer-proxy_${VERSION}_all.deb" || sudo apt-get install -f -y
+      
+      - name: Verify installation
+        run: |
+          [ -d "/opt/printer-proxy" ] && echo "OK: App directory exists"
+          [ -d "/opt/printer-proxy/venv" ] && echo "OK: Virtual environment created"
+          [ -f "/lib/systemd/system/printer-proxy.service" ] && echo "OK: Service installed"
+          
+          cd /opt/printer-proxy
+          sudo -u printer-proxy /opt/printer-proxy/venv/bin/python -c "from app import create_app; print('Imports OK')"
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [check-changes, build, test]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-package
+          path: builds/
+      
+      - name: Generate release notes
+        run: |
+          VERSION="${{ needs.check-changes.outputs.new_version }}"
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" --no-merges | head -20)
+          else
+            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+          fi
+          
+          {
+            echo "## What's Changed"
+            echo ""
+            echo "$COMMITS"
+            echo ""
+            echo "---"
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo "See the [APT Repository](https://jordonh18.github.io/printer-proxy) for installation instructions."
+          } > release_notes.md
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-changes.outputs.new_version }}
+          name: Printer Proxy v${{ needs.check-changes.outputs.new_version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(needs.check-changes.outputs.new_version, 'beta') || contains(needs.check-changes.outputs.new_version, 'alpha') }}
+          files: |
+            builds/printer-proxy_${{ needs.check-changes.outputs.new_version }}_all.deb
+            builds/printer-proxy_${{ needs.check-changes.outputs.new_version }}_all.deb.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-apt-repo:
+    name: Update APT Repository
+    runs-on: ubuntu-latest
+    needs: [check-changes, release]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-package
+          path: builds/
+      
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+      
+      - name: Update APT repository
+        run: |
+          VERSION="${{ needs.check-changes.outputs.new_version }}"
+          DEB_FILE="builds/printer-proxy_${VERSION}_all.deb"
+          
+          mkdir -p apt-repo/pool/main
+          mkdir -p apt-repo/dists/stable/main/binary-all
+          
+          cp "$DEB_FILE" apt-repo/pool/main/
+          
+          cd apt-repo
+          dpkg-scanpackages --arch all pool/ > dists/stable/main/binary-all/Packages
+          gzip -9c dists/stable/main/binary-all/Packages > dists/stable/main/binary-all/Packages.gz
+          
+          cd dists/stable
+          
+          {
+            echo "Origin: Printer Proxy"
+            echo "Label: Printer Proxy"
+            echo "Suite: stable"
+            echo "Codename: stable"
+            echo "Architectures: all"
+            echo "Components: main"
+            echo "Description: Printer Proxy APT Repository"
+            echo "Date: $(date -Ru)"
+          } > Release
+          
+          {
+            echo "MD5Sum:"
+            for f in main/binary-all/Packages main/binary-all/Packages.gz; do
+              if [ -f "$f" ]; then
+                SIZE=$(stat -c %s "$f")
+                HASH=$(md5sum "$f" | cut -d' ' -f1)
+                echo " $HASH $SIZE $f"
+              fi
+            done
+            echo "SHA256:"
+            for f in main/binary-all/Packages main/binary-all/Packages.gz; do
+              if [ -f "$f" ]; then
+                SIZE=$(stat -c %s "$f")
+                HASH=$(sha256sum "$f" | cut -d' ' -f1)
+                echo " $HASH $SIZE $f"
+              fi
+            done
+          } >> Release
+      
+      - name: Sign Release file
+        run: |
+          cd apt-repo/dists/stable
+          gpg --batch --armor --detach-sign --output Release.gpg Release
+          gpg --batch --armor --clearsign --output InRelease Release
+      
+      - name: Export public key
+        run: |
+          gpg --armor --export > apt-repo/gpg-key.asc
+      
+      - name: Commit and push APT repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add apt-repo/
+          git commit -m "Update APT repository with v${{ needs.check-changes.outputs.new_version }}" || echo "No changes to commit"
+          git push

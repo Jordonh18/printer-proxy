@@ -1,0 +1,3 @@
+"""
+Printer Proxy configuration package
+"""

@@ -1,0 +1,62 @@
+#!/bin/sh
+# postrm script for printer-proxy
+#
+# See: dh_installdeb(1)
+
+set -e
+
+APP_USER="printer-proxy"
+APP_GROUP="printer-proxy"
+
+case "$1" in
+    purge)
+        # Remove user and group
+        if getent passwd "$APP_USER" > /dev/null 2>&1; then
+            deluser --quiet --system "$APP_USER" 2>/dev/null || true
+        fi
+        if getent group "$APP_GROUP" > /dev/null 2>&1; then
+            delgroup --quiet --system "$APP_GROUP" 2>/dev/null || true
+        fi
+
+        # Remove data directories
+        rm -rf /var/lib/printer-proxy
+        rm -rf /var/log/printer-proxy
+        rm -rf /opt/printer-proxy/venv
+
+        # Remove configuration
+        rm -rf /etc/printer-proxy
+        rm -f /etc/sudoers.d/printer-proxy
+
+        # Remove nginx configuration
+        rm -f /etc/nginx/sites-enabled/printer-proxy
+        rm -f /etc/nginx/sites-available/printer-proxy
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            systemctl reload nginx 2>/dev/null || true
+        fi
+
+        # Remove SSL certificates
+        rm -f /etc/ssl/certs/printer-proxy.crt
+        rm -f /etc/ssl/private/printer-proxy.key
+
+        # Remove update service
+        rm -f /etc/systemd/system/printer-proxy-update.service
+        systemctl daemon-reload 2>/dev/null || true
+        ;;
+
+    remove)
+        # Stop and disable update service
+        systemctl stop printer-proxy-update.service 2>/dev/null || true
+        rm -f /etc/systemd/system/printer-proxy-update.service
+        systemctl daemon-reload 2>/dev/null || true
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,653 @@
+{% extends "base.html" %}
+
+{% block title %}{{ printer.name }} - Printer Proxy{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* shadcn-inspired styling */
+    .detail-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+    }
+    .detail-card-header {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+        font-weight: 600;
+        font-size: 1rem;
+        color: var(--foreground);
+    }
+    .detail-card-body {
+        padding: 1.25rem;
+    }
+    
+    /* Quick links to sub-pages */
+    .quick-links {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+    .quick-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--foreground);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+    .quick-link:hover {
+        background: var(--table-hover);
+        color: var(--foreground);
+        border-color: var(--input-focus);
+    }
+    .quick-link i {
+        font-size: 1rem;
+        color: var(--muted);
+    }
+    
+    /* Status colored headers */
+    .header-online {
+        background: var(--success-bg);
+        color: var(--success-text);
+    }
+    .header-offline {
+        background: var(--danger-bg);
+        color: var(--danger-text);
+    }
+    .header-redirected {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+    }
+    .header-target {
+        background: var(--info-bg);
+        color: var(--info-text);
+    }
+    
+    /* Status badge */
+    .status-pill {
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+    .status-online {
+        background: var(--success-bg);
+        color: var(--success-text);
+    }
+    .status-offline {
+        background: var(--background-secondary);
+        color: var(--muted);
+    }
+    .status-redirected {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+    }
+    .status-target {
+        background: var(--info-bg);
+        color: var(--info-text);
+    }
+    
+    /* Section headers */
+    .section-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        margin-bottom: 0.75rem;
+    }
+    
+    /* Info tables */
+    .info-table {
+        width: 100%;
+        table-layout: fixed;
+    }
+    .info-table td {
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.875rem;
+    }
+    .info-table tr:last-child td {
+        border-bottom: none;
+    }
+    .info-table td:first-child {
+        color: var(--muted);
+        width: 40%;
+    }
+    .info-table td:last-child {
+        color: var(--foreground);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .info-table code {
+        background: var(--background-secondary);
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.25rem;
+        font-size: 0.8rem;
+        color: var(--foreground);
+    }
+    
+    /* Stat cards */
+    .stat-card {
+        background: var(--background-secondary);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        text-align: center;
+    }
+    .stat-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--foreground);
+        line-height: 1.2;
+    }
+    .stat-label {
+        font-size: 0.7rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.25rem;
+    }
+    
+    /* Toner bars */
+    .toner-bar {
+        height: 8px;
+        border-radius: 9999px;
+        background: var(--border);
+        overflow: hidden;
+    }
+    .toner-bar .progress-bar {
+        transition: width 0.3s;
+        border-radius: 9999px;
+    }
+    .toner-low { background-color: var(--danger) !important; }
+    .toner-medium { background-color: var(--warning) !important; }
+    .toner-good { background-color: var(--success) !important; }
+    .toner-label {
+        font-size: 0.8rem;
+        color: var(--foreground);
+    }
+    .toner-percent {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--muted);
+    }
+    
+    /* Alert cards */
+    .redirect-alert {
+        background: var(--warning-bg);
+        border: 1px solid var(--warning);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-top: 1rem;
+    }
+    .redirect-alert-title {
+        font-weight: 600;
+        color: var(--warning-text);
+        margin-bottom: 0.5rem;
+    }
+    .redirect-alert code {
+        background: var(--background-secondary);
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.25rem;
+        font-size: 0.8rem;
+        color: var(--foreground);
+    }
+    
+    /* Action cards */
+    .action-card {
+        border-radius: 0.75rem;
+        overflow: hidden;
+    }
+    .action-card.danger {
+        border: 1px solid var(--danger);
+    }
+    .action-card.danger .action-header {
+        background: var(--danger);
+        color: white;
+        padding: 0.75rem 1rem;
+        font-weight: 600;
+    }
+    .action-card.warning {
+        border: 1px solid var(--warning);
+    }
+    .action-card.warning .action-header {
+        background: var(--warning);
+        color: var(--warning-text);
+        padding: 0.75rem 1rem;
+        font-weight: 600;
+    }
+    .action-body {
+        padding: 1.25rem;
+        background: var(--card-bg);
+    }
+    
+    /* Buttons */
+    .btn-action {
+        padding: 0.5rem 1.25rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        font-size: 0.875rem;
+        transition: all 0.15s;
+    }
+    .btn-danger-solid {
+        background: var(--danger);
+        color: white;
+        border: none;
+    }
+    .btn-danger-solid:hover {
+        opacity: 0.9;
+        color: white;
+    }
+    .btn-warning-solid {
+        background: var(--warning);
+        color: var(--warning-text);
+        border: none;
+    }
+    .btn-warning-solid:hover {
+        opacity: 0.9;
+        color: var(--warning-text);
+    }
+    
+    /* Form controls */
+    .form-select-styled {
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.875rem;
+        background: var(--card-bg);
+        color: var(--foreground);
+    }
+    .form-select-styled:focus {
+        border-color: var(--input-focus);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    /* Audit history */
+    .audit-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .audit-item {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .audit-item:last-child {
+        border-bottom: none;
+    }
+    .audit-action {
+        font-size: 0.875rem;
+        color: var(--foreground);
+        margin-bottom: 0.25rem;
+    }
+    .audit-meta {
+        font-size: 0.75rem;
+        color: var(--muted);
+    }
+    
+    /* Breadcrumb */
+    .breadcrumb-modern {
+        background: none;
+        padding: 0;
+        margin-bottom: 1.5rem;
+    }
+    .breadcrumb-modern a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.875rem;
+    }
+    .breadcrumb-modern a:hover {
+        color: var(--foreground);
+    }
+    .breadcrumb-modern .active {
+        color: var(--foreground);
+        font-weight: 500;
+    }
+    .breadcrumb-modern .separator {
+        color: var(--border);
+        margin: 0 0.5rem;
+    }
+    
+    /* Health indicators */
+    .health-ok {
+        color: var(--success);
+    }
+    .health-critical {
+        color: var(--danger);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb-modern">
+    <a href="{{ url_for('main.dashboard') }}">Dashboard</a>
+    <span class="separator">/</span>
+    <span class="active">{{ printer.name }}</span>
+</nav>
+
+<!-- Quick links to sub-pages -->
+<div class="quick-links">
+    <a href="{{ url_for('main.printer_queue', printer_id=printer.id) }}" class="quick-link">
+        <i class="bi bi-list-task"></i> Print Queue
+    </a>
+    <a href="{{ url_for('main.printer_jobs', printer_id=printer.id) }}" class="quick-link">
+        <i class="bi bi-clock-history"></i> Job History
+    </a>
+    <a href="{{ url_for('main.printer_logs', printer_id=printer.id) }}" class="quick-link">
+        <i class="bi bi-journal-text"></i> Logs
+    </a>
+</div>
+
+<div class="row">
+    <!-- Main Content -->
+    <div class="col-lg-8">
+        <!-- Printer Info Card -->
+        <div class="detail-card mb-4">
+            <div class="detail-card-header d-flex justify-content-between align-items-center">
+                <span>{{ printer.name }}</span>
+                {% if status.status.is_redirected %}
+                    <span class="status-pill status-redirected">Redirected</span>
+                {% elif status.status.is_redirect_target %}
+                    <span class="status-pill status-target">Redirect Target</span>
+                {% elif status.status.is_online %}
+                    <span class="status-pill status-online">Online</span>
+                {% else %}
+                    <span class="status-pill status-offline">Offline</span>
+                {% endif %}
+            </div>
+            <div class="detail-card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3 mb-md-0">
+                        <div class="section-title">Printer Information</div>
+                        <table class="info-table">
+                            <tr><td>ID</td><td title="{{ printer.id }}"><code>{{ printer.id }}</code></td></tr>
+                            <tr><td>IP Address</td><td title="{{ printer.ip }}"><code>{{ printer.ip }}</code></td></tr>
+                            <tr><td>Model</td><td title="{{ printer.model or 'N/A' }}">{{ printer.model or 'N/A' }}</td></tr>
+                            <tr><td>Location</td><td title="{{ printer.location or 'N/A' }}">{{ printer.location or 'N/A' }}</td></tr>
+                            <tr><td>Department</td><td title="{{ printer.department or 'N/A' }}">{{ printer.department or 'N/A' }}</td></tr>
+                            <tr>
+                                <td>Health</td>
+                                <td>
+                                    {% if status.status.is_online %}
+                                    <span class="health-ok fw-semibold">● OK</span>
+                                    {% else %}
+                                    <span class="health-critical fw-semibold">● Critical</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="section-title">Network Status</div>
+                        <table class="info-table">
+                            <tr>
+                                <td>ICMP</td>
+                                <td>
+                                    {% if status.status.icmp_reachable %}
+                                    <span class="health-ok fw-semibold">● Reachable</span>
+                                    {% else %}
+                                    <span class="health-critical fw-semibold">● Unreachable</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>TCP 9100</td>
+                                <td>
+                                    {% if status.status.tcp_reachable %}
+                                    <span class="health-ok fw-semibold">● Open</span>
+                                    {% else %}
+                                    <span class="health-critical fw-semibold">● Closed</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% if health_status %}
+                            <tr>
+                                <td>Last Check</td>
+                                <td>{{ health_status.last_checked[:16] if health_status.last_checked else 'Never' }}</td>
+                            </tr>
+                            {% if health_status.consecutive_failures > 0 %}
+                            <tr>
+                                <td>Failures</td>
+                                <td><span class="health-critical fw-semibold">{{ health_status.consecutive_failures }} consecutive</span></td>
+                            </tr>
+                            {% endif %}
+                            {% endif %}
+                        </table>
+                    </div>
+                </div>
+                
+                {% if status.status.is_redirected %}
+                <div class="redirect-alert">
+                    <div class="redirect-alert-title">Active Redirect</div>
+                    <div style="font-size: 0.875rem;">
+                        Traffic to <code>{{ printer.ip }}</code> → <code>{{ status.status.redirect_info.target_ip }}</code>
+                        ({{ status.status.redirect_info.target_printer_id }})
+                    </div>
+                    <div style="font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem;">
+                        Since {{ status.status.redirect_info.enabled_at }} by {{ status.status.redirect_info.enabled_by }}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- SNMP Statistics Card (loaded asynchronously) -->
+        <div class="detail-card mb-4" id="stats-card">
+            <div class="detail-card-header d-flex justify-content-between align-items-center">
+                <span>Printer Statistics</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadPrinterStats()" id="refresh-stats-btn">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+            <div class="detail-card-body" id="stats-content">
+                <div class="text-center py-4" id="stats-loading">
+                    <div class="spinner-border spinner-border-sm text-muted" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="mt-2 text-muted" style="font-size: 0.875rem;">Loading printer statistics...</div>
+                </div>
+                <div id="stats-data" style="display: none;"></div>
+                <div id="stats-error" style="display: none;" class="text-center py-4 text-muted" style="font-size: 0.875rem;">
+                    Unable to retrieve printer statistics
+                </div>
+            </div>
+        </div>
+        
+        <!-- Redirect Actions -->
+        {% if not status.status.is_redirected and not status.status.is_redirect_target %}
+        <div class="action-card danger mb-4">
+            <div class="action-header">
+                Create Redirect
+            </div>
+            <div class="action-body">
+                {% if status.status.is_online %}
+                <div class="redirect-alert mb-3">
+                    <div class="redirect-alert-title">Warning</div>
+                    <div style="font-size: 0.875rem; color: var(--warning-text);">
+                        This printer appears to be online. Redirecting may cause conflicts.
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if available_targets %}
+                <form method="POST" action="{{ url_for('main.create_redirect', printer_id=printer.id) }}"
+                      onsubmit="return confirm('Redirect traffic for {{ printer.name }}?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    
+                    <div class="mb-3">
+                        <label for="target_printer_id" class="form-label" style="font-size: 0.875rem; font-weight: 500;">Redirect to:</label>
+                        <select class="form-select form-select-styled" name="target_printer_id" id="target_printer_id" required>
+                            <option value="">-- Select target printer --</option>
+                            {% for target in available_targets %}
+                            <option value="{{ target.id }}">
+                                {{ target.name }} ({{ target.ip }}){% if target.location %} - {{ target.location }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="btn-action btn-danger-solid">
+                        Enable Redirect
+                    </button>
+                </form>
+                {% else %}
+                <p style="color: var(--muted); font-size: 0.875rem; margin: 0;">
+                    No available printers for redirect.
+                </p>
+                {% endif %}
+            </div>
+        </div>
+        {% elif status.status.is_redirected %}
+        <div class="action-card warning mb-4">
+            <div class="action-header">
+                Remove Redirect
+            </div>
+            <div class="action-body">
+                <form method="POST" action="{{ url_for('main.remove_redirect', printer_id=printer.id) }}"
+                      onsubmit="return confirm('Remove redirect for {{ printer.name }}?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn-action btn-warning-solid">
+                        Remove Redirect
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% elif status.status.is_redirect_target %}
+        <div class="redirect-alert" style="background: var(--info-bg); border-color: var(--info);">
+            <div class="redirect-alert-title" style="color: var(--info-text);">Redirect Target</div>
+            <div style="font-size: 0.875rem; color: var(--info-text);">
+                This printer is receiving redirected traffic and cannot be redirected itself.
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Sidebar -->
+    <div class="col-lg-4">
+        <!-- Audit History -->
+        <div class="detail-card">
+            <div class="detail-card-header">
+                Audit History
+            </div>
+            <div style="max-height: 350px; overflow-y: auto;">
+                {% if audit_history %}
+                <ul class="audit-list">
+                    {% for entry in audit_history[:10] %}
+                    <li class="audit-item">
+                        <div class="audit-action">{{ entry.action }}</div>
+                        <div class="audit-meta">{{ entry.timestamp[:16] }} · {{ entry.username }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <div style="padding: 1.5rem; text-align: center; color: var(--muted); font-size: 0.875rem;">
+                    No audit history
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+// Async loading for printer statistics (SNMP data)
+const printerId = "{{ printer.id }}";
+
+function loadPrinterStats() {
+    const loading = document.getElementById('stats-loading');
+    const data = document.getElementById('stats-data');
+    const error = document.getElementById('stats-error');
+    const btn = document.getElementById('refresh-stats-btn');
+    
+    loading.style.display = 'block';
+    data.style.display = 'none';
+    error.style.display = 'none';
+    btn.disabled = true;
+    
+    fetch(`/api/printers/${printerId}/stats`)
+        .then(response => response.json())
+        .then(result => {
+            loading.style.display = 'none';
+            btn.disabled = false;
+            
+            if (result.stats && result.stats.reachable) {
+                const stats = result.stats;
+                const toner = result.toner || {};
+                
+                let html = `
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-4">
+                            <div class="stat-card">
+                                <div class="stat-value">${stats.total_pages || 0}</div>
+                                <div class="stat-label">Total Pages</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stat-card">
+                                <div class="stat-value">${stats.status || 'Unknown'}</div>
+                                <div class="stat-label">Status</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stat-card">
+                                <div class="stat-value">${stats.uptime || 'N/A'}</div>
+                                <div class="stat-label">Uptime</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Add toner levels if available
+                if (Object.keys(toner).length > 0) {
+                    html += '<div class="section-title">Toner / Supply Levels</div><div class="row g-3">';
+                    for (const [color, level] of Object.entries(toner)) {
+                        const colorClass = level <= 10 ? 'toner-low' : (level <= 25 ? 'toner-medium' : 'toner-good');
+                        html += `
+                            <div class="col-md-6">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="toner-label">${color.charAt(0).toUpperCase() + color.slice(1)}</span>
+                                    <span class="toner-percent">${level}%</span>
+                                </div>
+                                <div class="toner-bar">
+                                    <div class="progress-bar ${colorClass}" style="width: ${level}%; height: 100%;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    html += '</div>';
+                }
+                
+                data.innerHTML = html;
+                data.style.display = 'block';
+            } else {
+                error.style.display = 'block';
+            }
+        })
+        .catch(err => {
+            console.error('Error loading stats:', err);
+            loading.style.display = 'none';
+            error.style.display = 'block';
+            btn.disabled = false;
+        });
+}
+
+// Load stats on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadPrinterStats();
+});
+</script>
+{% endblock %}

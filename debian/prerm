@@ -1,0 +1,25 @@
+#!/bin/sh
+# prerm script for printer-proxy
+#
+# See: dh_installdeb(1)
+
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Stop the service gracefully
+        if systemctl is-active --quiet printer-proxy.service 2>/dev/null; then
+            systemctl stop printer-proxy.service || true
+        fi
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

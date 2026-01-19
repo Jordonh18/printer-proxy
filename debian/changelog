@@ -1,0 +1,8 @@
+printer-proxy (1.0.0-beta.1) unstable; urgency=medium
+
+  * Initial beta release with new versioning scheme
+  * APT repository integration for automated updates
+  * Improved CI/CD pipeline with automatic versioning
+  * Full version history reset - starting fresh
+
+ -- Jordon Harrison <jordonh18@users.noreply.github.com>  Sun, 19 Jan 2025 16:00:00 +0000

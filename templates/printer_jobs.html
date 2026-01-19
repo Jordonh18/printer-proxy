@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block title %}{{ printer.name }} - Job History{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Breadcrumb */
+    .breadcrumb-modern {
+        background: none;
+        padding: 0;
+        margin-bottom: 1.5rem;
+    }
+    .breadcrumb-modern a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.875rem;
+    }
+    .breadcrumb-modern a:hover {
+        color: var(--foreground);
+    }
+    .breadcrumb-modern .active {
+        color: var(--foreground);
+        font-weight: 500;
+    }
+    .breadcrumb-modern .separator {
+        color: var(--border);
+        margin: 0 0.5rem;
+    }
+    
+    /* Stats row */
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    @media (max-width: 768px) {
+        .stats-row {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    .stat-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        padding: 1.25rem;
+        text-align: center;
+    }
+    .stat-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--foreground);
+        line-height: 1.2;
+    }
+    .stat-label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--muted);
+        margin-top: 0.25rem;
+    }
+    
+    /* Table card */
+    .table-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+    }
+    .table-card-header {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .table-card-header h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin: 0;
+    }
+    
+    /* Jobs table */
+    .jobs-table {
+        width: 100%;
+        font-size: 0.875rem;
+    }
+    .jobs-table th {
+        text-align: left;
+        padding: 0.75rem 1rem;
+        font-weight: 600;
+        color: var(--muted);
+        background: var(--background-secondary);
+        border-bottom: 1px solid var(--border);
+    }
+    .jobs-table td {
+        padding: 0.6rem 1rem;
+        color: var(--foreground);
+        border-bottom: 1px solid var(--border);
+    }
+    .jobs-table tr:last-child td {
+        border-bottom: none;
+    }
+    .jobs-table tr:hover td {
+        background: var(--table-hover);
+    }
+    
+    /* Status pills */
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.625rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    .status-completed {
+        background: var(--success-bg);
+        color: var(--success-text);
+    }
+    .status-aborted, .status-canceled {
+        background: var(--danger-bg);
+        color: var(--danger-text);
+    }
+    .status-processing {
+        background: hsl(214 95% 90%);
+        color: hsl(214 95% 30%);
+    }
+    [data-theme="dark"] .status-processing {
+        background: hsl(214 70% 25%);
+        color: hsl(214 95% 80%);
+    }
+    .status-pending {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+    }
+    
+    /* Empty state */
+    .empty-state {
+        padding: 3rem 2rem;
+        text-align: center;
+        color: var(--muted);
+    }
+    .empty-state i {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+    .empty-state h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--foreground);
+        margin-bottom: 0.5rem;
+    }
+    
+    .text-muted {
+        color: var(--muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb-modern">
+    <a href="{{ url_for('main.dashboard') }}">Dashboard</a>
+    <span class="separator">/</span>
+    <a href="{{ url_for('main.printer_detail', printer_id=printer.id) }}">{{ printer.name }}</a>
+    <span class="separator">/</span>
+    <span class="active">Job History</span>
+</nav>
+
+<!-- Stats Row -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total_jobs }}</div>
+        <div class="stat-label">Total Jobs</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total_pages }}</div>
+        <div class="stat-label">Total Pages</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.jobs_today }}</div>
+        <div class="stat-label">Today</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.completed_jobs }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+</div>
+
+<!-- Jobs Table -->
+<div class="table-card">
+    <div class="table-card-header">
+        <h2>Recent Print Jobs</h2>
+    </div>
+    {% if jobs %}
+    <table class="jobs-table">
+        <thead>
+            <tr>
+                <th>Job ID</th>
+                <th>Name</th>
+                <th>Owner</th>
+                <th>Pages</th>
+                <th>Status</th>
+                <th>Completed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td>#{{ job.job_id }}</td>
+                <td>{{ job.name or 'Unknown' }}</td>
+                <td>{{ job.owner or 'Unknown' }}</td>
+                <td>{{ job.pages }}</td>
+                <td>
+                    <span class="status-pill status-{{ job.status|lower|replace(' ', '-') }}">
+                        {{ job.status }}
+                    </span>
+                </td>
+                <td class="text-muted">
+                    {% if job.completed_at %}
+                        {{ job.completed_at.strftime('%Y-%m-%d %H:%M') if job.completed_at is not string else job.completed_at[:16] }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-file-earmark-text"></i>
+        <h3>No job history</h3>
+        <p>Print jobs will appear here once recorded</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
