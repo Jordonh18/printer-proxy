@@ -173,3 +173,11 @@ PASSWORD_REQUIRE_SPECIAL = True
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 15
+
+# =============================================================================
+# JWT Settings
+# =============================================================================
+
+JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or _get_or_create_secret_key(DATA_DIR) + '-jwt'
+JWT_ACCESS_TOKEN_EXPIRES_HOURS = 24
+JWT_REFRESH_TOKEN_EXPIRES_DAYS = 30

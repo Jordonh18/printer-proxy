@@ -23,13 +23,43 @@ echo "=============================================="
 echo ""
 
 # Check for required tools
-for cmd in dpkg-deb fakeroot; do
+for cmd in dpkg-deb fakeroot node npm; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "Error: $cmd is required but not installed."
-        echo "Install with: sudo apt install dpkg-dev fakeroot"
+        if [ "$cmd" = "node" ] || [ "$cmd" = "npm" ]; then
+            echo "Install with: sudo apt install nodejs npm"
+        else
+            echo "Install with: sudo apt install dpkg-dev fakeroot"
+        fi
         exit 1
     fi
 done
+
+# Build React frontend
+echo "Building React frontend..."
+if [ -d "$PROJECT_DIR/frontend" ]; then
+    cd "$PROJECT_DIR/frontend"
+    
+    # Install dependencies if node_modules doesn't exist
+    if [ ! -d "node_modules" ]; then
+        echo "Installing frontend dependencies..."
+        npm install
+    fi
+    
+    # Build production bundle
+    echo "Creating production build..."
+    npm run build
+    
+    cd "$PROJECT_DIR"
+    
+    if [ ! -d "$PROJECT_DIR/frontend/dist" ]; then
+        echo "Error: Frontend build failed - dist directory not created"
+        exit 1
+    fi
+    echo "Frontend build complete!"
+else
+    echo "Warning: frontend directory not found, skipping React build"
+fi
 
 # Clean previous build
 rm -rf "$BUILD_DIR"
@@ -41,8 +71,8 @@ mkdir -p "$BUILD_DIR/DEBIAN"
 mkdir -p "$BUILD_DIR/opt/printer-proxy/app"
 mkdir -p "$BUILD_DIR/opt/printer-proxy/config"
 mkdir -p "$BUILD_DIR/opt/printer-proxy/scripts"
-mkdir -p "$BUILD_DIR/opt/printer-proxy/templates/errors"
 mkdir -p "$BUILD_DIR/opt/printer-proxy/static"
+mkdir -p "$BUILD_DIR/opt/printer-proxy/frontend/dist"
 mkdir -p "$BUILD_DIR/etc/printer-proxy"
 mkdir -p "$BUILD_DIR/lib/systemd/system"
 mkdir -p "$BUILD_DIR/usr/share/doc/printer-proxy"
@@ -55,8 +85,6 @@ find "$PROJECT_DIR/app" -name "*.py" -exec cp {} "$BUILD_DIR/opt/printer-proxy/a
 cp "$PROJECT_DIR/config/__init__.py" "$BUILD_DIR/opt/printer-proxy/config/"
 cp "$PROJECT_DIR/config/config.py" "$BUILD_DIR/opt/printer-proxy/config/"
 cp "$PROJECT_DIR/scripts/"*.sh "$BUILD_DIR/opt/printer-proxy/scripts/"
-cp -r "$PROJECT_DIR/templates/"*.html "$BUILD_DIR/opt/printer-proxy/templates/" 2>/dev/null || true
-cp -r "$PROJECT_DIR/templates/errors/"*.html "$BUILD_DIR/opt/printer-proxy/templates/errors/" 2>/dev/null || true
 cp "$PROJECT_DIR/requirements.txt" "$BUILD_DIR/opt/printer-proxy/"
 cp "$PROJECT_DIR/wsgi.py" "$BUILD_DIR/opt/printer-proxy/"
 cp "$PROJECT_DIR/run.py" "$BUILD_DIR/opt/printer-proxy/"
@@ -64,6 +92,12 @@ cp "$PROJECT_DIR/run.py" "$BUILD_DIR/opt/printer-proxy/"
 # Copy static files if they exist
 if [ -d "$PROJECT_DIR/static" ] && [ "$(ls -A "$PROJECT_DIR/static" 2>/dev/null)" ]; then
     cp -r "$PROJECT_DIR/static/"* "$BUILD_DIR/opt/printer-proxy/static/" 2>/dev/null || true
+fi
+
+# Copy React frontend build
+if [ -d "$PROJECT_DIR/frontend/dist" ]; then
+    echo "Copying React frontend build..."
+    cp -r "$PROJECT_DIR/frontend/dist/"* "$BUILD_DIR/opt/printer-proxy/frontend/dist/"
 fi
 
 # Copy systemd service

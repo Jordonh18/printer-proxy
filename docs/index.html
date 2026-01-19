@@ -27,13 +27,13 @@
         <span class="step-number">1</span>
         <strong>Download and add the GPG signing key:</strong>
     </div>
-    <pre>curl -fsSL https://jordonh18.github.io/printer-proxy/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/printer-proxy.gpg</pre>
+    <pre>curl -fsSL https://apt.jordonh.me/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/printer-proxy.gpg</pre>
     
     <div class="step">
         <span class="step-number">2</span>
         <strong>Add the repository:</strong>
     </div>
-    <pre>echo "deb [signed-by=/usr/share/keyrings/printer-proxy.gpg] https://jordonh18.github.io/printer-proxy stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list</pre>
+    <pre>echo "deb [signed-by=/usr/share/keyrings/printer-proxy.gpg] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list</pre>
     
     <div class="step">
         <span class="step-number">3</span>
@@ -56,7 +56,7 @@ sudo apt upgrade printer-proxy</pre>
 
     <h2>Repository Information</h2>
     <ul>
-        <li><strong>Repository URL:</strong> <code>https://jordonh18.github.io/printer-proxy</code></li>
+        <li><strong>Repository URL:</strong> <code>https://apt.jordonh.me</code></li>
         <li><strong>Distribution:</strong> <code>stable</code></li>
         <li><strong>Component:</strong> <code>main</code></li>
         <li><strong>Architecture:</strong> <code>all</code> (platform independent)</li>

@@ -1,14 +1,17 @@
 """
-Flask routes and views
+Flask API routes for React frontend
 """
-from flask import (
-    Blueprint, render_template, redirect, url_for, flash,
-    request, jsonify, current_app
+from functools import wraps
+from uuid import uuid4
+from flask import Blueprint, request, jsonify, g, current_app
+from flask_jwt_extended import (
+    verify_jwt_in_request, get_jwt_identity, get_jwt,
+    create_access_token, create_refresh_token, jwt_required
 )
-from flask_login import login_user, logout_user, login_required, current_user
+from flask_jwt_extended.exceptions import JWTExtendedException
 
 from app.models import AuditLog, ActiveRedirect, User
-from app.auth import authenticate_user, create_initial_admin, validate_password_strength, role_required, hash_password
+from app.auth import authenticate_user, validate_password_strength, hash_password
 from app.printers import get_registry, Printer
 from app.network import get_network_manager
 from app.discovery import get_discovery
@@ -18,793 +21,217 @@ from config.config import (
     PASSWORD_REQUIRE_UPPERCASE,
     PASSWORD_REQUIRE_LOWERCASE,
     PASSWORD_REQUIRE_DIGIT,
-    PASSWORD_REQUIRE_SPECIAL
+    PASSWORD_REQUIRE_SPECIAL,
+    SUPPORTED_PROTOCOLS
 )
 
 
-# Blueprints
-main_bp = Blueprint('main', __name__)
-auth_bp = Blueprint('auth', __name__)
+# API Blueprint only - React handles all UI
 api_bp = Blueprint('api', __name__)
 
 
-# ============================================================================
-# Main Routes
-# ============================================================================
-
-@main_bp.route('/')
-@login_required
-def dashboard():
-    """Main dashboard showing all printers and their status."""
-    registry = get_registry()
-    printers = registry.get_all_statuses()
-    active_redirects = ActiveRedirect.get_all()
-    
-    return render_template('dashboard.html',
-                         printers=printers,
-                         active_redirects=active_redirects)
-
-
-@main_bp.route('/printer/<printer_id>')
-@login_required
-def printer_detail(printer_id):
-    """Detailed view of a specific printer."""
-    from app.health_check import get_printer_health, get_printer_health_history
-    
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-    
-    if not printer:
-        flash('Printer not found', 'error')
-        return redirect(url_for('main.dashboard'))
-    
-    status = registry.get_printer_status(printer, use_cache=True)
-    available_targets = registry.get_available_targets(exclude_printer_id=printer_id)
-    audit_history = AuditLog.get_by_printer(printer_id)
-    
-    # Get health check status (fast - from cache)
-    health_status = get_printer_health(printer_id)
-    health_history = get_printer_health_history(printer_id, limit=24)
-    
-    # NOTE: SNMP stats are loaded asynchronously via JavaScript
-    # to avoid blocking page render
-    
-    return render_template('printer_detail.html',
-                         printer=printer,
-                         status=status,
-                         available_targets=available_targets,
-                         audit_history=audit_history,
-                         health_status=health_status,
-                         health_history=health_history)
-
-
-@main_bp.route('/printer/<printer_id>/queue')
-@login_required
-def printer_queue(printer_id):
-    """Print queue for a specific printer."""
-    from app.print_queue import get_print_queue
-    
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-    
-    if not printer:
-        flash('Printer not found', 'error')
-        return redirect(url_for('main.dashboard'))
-    
-    queue = get_print_queue(printer.ip)
-    
-    return render_template('printer_queue.html',
-                         printer=printer,
-                         queue=queue)
-
-
-@main_bp.route('/printer/<printer_id>/jobs')
-@login_required
-def printer_jobs(printer_id):
-    """Job history for a specific printer."""
-    from app.models import PrintJobHistory
-    
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-    
-    if not printer:
-        flash('Printer not found', 'error')
-        return redirect(url_for('main.dashboard'))
-    
-    jobs = PrintJobHistory.get_for_printer(printer_id, limit=100)
-    stats = PrintJobHistory.get_statistics(printer_id)
-    
-    return render_template('printer_jobs.html',
-                         printer=printer,
-                         jobs=jobs,
-                         stats=stats)
-
-
-@main_bp.route('/printer/<printer_id>/logs')
-@login_required
-def printer_logs(printer_id):
-    """Logs for a specific printer."""
-    from app.print_queue import get_printer_logs
-    
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-    
-    if not printer:
-        flash('Printer not found', 'error')
-        return redirect(url_for('main.dashboard'))
-    
-    # Get current logs from SNMP
-    logs = get_printer_logs(printer.ip)
-    
-    return render_template('printer_logs.html',
-                         printer=printer,
-                         logs=logs)
-
-
-@main_bp.route('/redirect/<printer_id>', methods=['POST'])
-@login_required
-@role_required('admin', 'operator')
-def create_redirect(printer_id):
-    """Create a new redirect for a printer."""
-    registry = get_registry()
-    network = get_network_manager()
-    
-    source_printer = registry.get_by_id(printer_id)
-    if not source_printer:
-        flash('Source printer not found', 'error')
-        return redirect(url_for('main.dashboard'))
-    
-    target_printer_id = request.form.get('target_printer_id')
-    target_printer = registry.get_by_id(target_printer_id)
-    
-    if not target_printer:
-        flash('Target printer not found', 'error')
-        return redirect(url_for('main.printer_detail', printer_id=printer_id))
-    
-    # Safety checks
-    if source_printer.ip == target_printer.ip:
-        flash('Source and target printer cannot have the same IP', 'error')
-        return redirect(url_for('main.printer_detail', printer_id=printer_id))
-    
-    # Check if source is already redirected
-    existing = ActiveRedirect.get_by_source_printer(printer_id)
-    if existing:
-        flash('This printer already has an active redirect', 'error')
-        return redirect(url_for('main.printer_detail', printer_id=printer_id))
-    
-    # Check if target is already in use
-    if ActiveRedirect.is_target_in_use(target_printer_id):
-        flash('Target printer is already being used as a redirect target', 'error')
-        return redirect(url_for('main.printer_detail', printer_id=printer_id))
-    
-    # Check if source printer is still reachable (should be offline)
-    if registry.check_tcp_reachability(source_printer.ip):
-        flash('Warning: Source printer appears to be online. Redirect may cause conflicts.', 'warning')
-    
-    # Check if target printer is reachable
-    if not registry.check_tcp_reachability(target_printer.ip):
-        flash('Warning: Target printer appears to be offline', 'warning')
-    
-    # Enable the redirect
-    success, message = network.enable_redirect(
-        source_ip=source_printer.ip,
-        target_ip=target_printer.ip,
-        port=DEFAULT_PORT
-    )
-    
-    if success:
-        # Record in database
-        ActiveRedirect.create(
-            source_printer_id=printer_id,
-            source_ip=source_printer.ip,
-            target_printer_id=target_printer_id,
-            target_ip=target_printer.ip,
-            protocol='raw',
-            port=DEFAULT_PORT,
-            enabled_by=current_user.username
-        )
-        
-        # Audit log
-        AuditLog.log(
-            username=current_user.username,
-            action="REDIRECT_ENABLED",
-            source_printer_id=printer_id,
-            source_ip=source_printer.ip,
-            target_printer_id=target_printer_id,
-            target_ip=target_printer.ip,
-            details=f"Redirecting {source_printer.name} to {target_printer.name}",
-            success=True
-        )
-        
-        flash(f'Redirect enabled: {source_printer.name} → {target_printer.name}', 'success')
-    else:
-        AuditLog.log(
-            username=current_user.username,
-            action="REDIRECT_ENABLE_FAILED",
-            source_printer_id=printer_id,
-            source_ip=source_printer.ip,
-            target_printer_id=target_printer_id,
-            target_ip=target_printer.ip,
-            success=False,
-            error_message=message
-        )
-        flash(f'Failed to enable redirect: {message}', 'error')
-    
-    return redirect(url_for('main.printer_detail', printer_id=printer_id))
-
-
-@main_bp.route('/redirect/<printer_id>/remove', methods=['POST'])
-@login_required
-@role_required('admin', 'operator')
-def remove_redirect(printer_id):
-    """Remove an active redirect."""
-    registry = get_registry()
-    network = get_network_manager()
-    
-    redirect_obj = ActiveRedirect.get_by_source_printer(printer_id)
-    if not redirect_obj:
-        flash('No active redirect found for this printer', 'error')
-        return redirect(url_for('main.dashboard'))
-    
-    # Disable the redirect
-    success, message = network.disable_redirect(
-        source_ip=redirect_obj.source_ip,
-        target_ip=redirect_obj.target_ip,
-        port=redirect_obj.port
-    )
-    
-    source_printer = registry.get_by_id(printer_id)
-    target_printer = registry.get_by_id(redirect_obj.target_printer_id)
-    
-    if success:
-        # Remove from database and record history
-        redirect_obj.delete(
-            disabled_by=current_user.username,
-            reason="Manual removal via web UI"
-        )
-        
-        # Audit log
-        AuditLog.log(
-            username=current_user.username,
-            action="REDIRECT_DISABLED",
-            source_printer_id=printer_id,
-            source_ip=redirect_obj.source_ip,
-            target_printer_id=redirect_obj.target_printer_id,
-            target_ip=redirect_obj.target_ip,
-            details=f"Removed redirect from {source_printer.name if source_printer else printer_id}",
-            success=True
-        )
-        
-        flash('Redirect removed successfully', 'success')
-    else:
-        AuditLog.log(
-            username=current_user.username,
-            action="REDIRECT_DISABLE_FAILED",
-            source_printer_id=printer_id,
-            source_ip=redirect_obj.source_ip,
-            target_printer_id=redirect_obj.target_printer_id,
-            target_ip=redirect_obj.target_ip,
-            success=False,
-            error_message=message
-        )
-        flash(f'Failed to remove redirect: {message}', 'error')
-    
-    return redirect(url_for('main.dashboard'))
-
-
-@main_bp.route('/audit')
-@login_required
-@role_required('admin', 'operator')
-def audit_log():
-    """View audit log."""
-    logs = AuditLog.get_recent(limit=200)
-    return render_template('audit_log.html', logs=logs)
-
-
-@main_bp.route('/statistics')
-@login_required
-@role_required('admin', 'operator')
-def statistics():
-    """View redirect statistics."""
-    from app.models import RedirectHistory
-    
-    stats = RedirectHistory.get_statistics()
-    history = RedirectHistory.get_all(limit=50)
-    
-    return render_template('statistics.html', stats=stats, history=history)
+def _serialize_timestamp(value):
+    if not value:
+        return None
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return str(value)
 
 
 # ============================================================================
-# Printer Management Routes
+# API Authentication Helpers
 # ============================================================================
 
-@main_bp.route('/printers/manage')
-@login_required
-@role_required('admin', 'operator')
-def manage_printers():
-    """Printer management page."""
-    registry = get_registry()
-    printers = registry.get_all_statuses(use_cache=True)
-    return render_template('manage_printers.html', printers=printers)
-
-
-@main_bp.route('/printers/add', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def add_printer():
-    """Add a new printer."""
-    registry = get_registry()
-    
-    if request.method == 'POST':
-        printer_id = request.form.get('printer_id', '').strip().lower().replace(' ', '-')
-        name = request.form.get('name', '').strip()
-        ip = request.form.get('ip', '').strip()
-        location = request.form.get('location', '').strip()
-        model = request.form.get('model', '').strip()
-        department = request.form.get('department', '').strip()
-        notes = request.form.get('notes', '').strip()
-        
-        # Validation
-        errors = []
-        if not printer_id:
-            errors.append('Printer ID is required')
-        elif registry.id_exists(printer_id):
-            errors.append('Printer ID already exists')
-        
-        if not name:
-            errors.append('Printer name is required')
-        
-        if not ip:
-            errors.append('IP address is required')
-        else:
-            # Validate IP format
-            import ipaddress
-            try:
-                ipaddress.ip_address(ip)
-            except ValueError:
-                errors.append('Invalid IP address format')
-            
-            if registry.ip_exists(ip):
-                errors.append('IP address already in use by another printer')
-        
-        if errors:
-            for error in errors:
-                flash(error, 'error')
-            return render_template('printer_form.html', 
-                                 mode='add',
-                                 printer={'id': printer_id, 'name': name, 'ip': ip, 
-                                         'location': location, 'model': model,
-                                         'department': department, 'notes': notes})
-        
-        # Create printer
-        printer = Printer(
-            id=printer_id,
-            name=name,
-            ip=ip,
-            protocols=['raw'],
-            location=location,
-            model=model,
-            department=department,
-            notes=notes
-        )
-        
-        if registry.add_printer(printer):
-            # Start background services if they were deferred
-            try:
-                from app.health_check import get_scheduler, start_health_checks
-                scheduler = get_scheduler()
-                if not scheduler.is_running():
-                    start_health_checks()
-
-                from app.job_monitor import get_job_monitor
-                monitor = get_job_monitor()
-                if not monitor.is_running():
-                    monitor.init_app(current_app._get_current_object())
-                    monitor.start()
-            except Exception as e:
-                current_app.logger.error(f"Failed to start background services after add: {e}")
-
-            AuditLog.log(
-                username=current_user.username,
-                action="PRINTER_ADDED",
-                source_printer_id=printer_id,
-                source_ip=ip,
-                details=f"Added printer: {name}",
-                success=True
+def api_auth_required(fn):
+    """Decorator for API routes that require JWT authentication."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            verify_jwt_in_request()
+            user_id = get_jwt_identity()
+            user = User.get_by_id(int(user_id)) if user_id is not None else None
+            if user and user.is_active:
+                g.api_user = user
+                g.api_claims = get_jwt()
+                return fn(*args, **kwargs)
+        except JWTExtendedException as exc:
+            auth_present = bool(request.headers.get('Authorization'))
+            current_app.logger.warning(
+                'JWT auth failed: %s (auth header present: %s)',
+                str(exc),
+                auth_present
             )
-            flash(f'Printer "{name}" added successfully', 'success')
-            return redirect(url_for('main.manage_printers'))
-        else:
-            flash('Failed to add printer', 'error')
-    
-    return render_template('printer_form.html', mode='add', printer=None)
+            status_code = getattr(exc, 'status_code', 401)
+            return jsonify({'error': str(exc)}), status_code
+        except Exception as exc:
+            current_app.logger.warning('JWT auth error: %s', str(exc))
+            return jsonify({'error': 'Authentication required'}), 401
+    return wrapper
 
 
-@main_bp.route('/printers/<printer_id>/edit', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def edit_printer(printer_id):
-    """Edit an existing printer."""
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-    
-    if not printer:
-        flash('Printer not found', 'error')
-        return redirect(url_for('main.manage_printers'))
-    
-    # Check for active redirects
-    has_redirect = ActiveRedirect.get_by_source_printer(printer_id) is not None
-    is_target = ActiveRedirect.is_target_in_use(printer_id)
-    
-    if request.method == 'POST':
-        name = request.form.get('name', '').strip()
-        ip = request.form.get('ip', '').strip()
-        location = request.form.get('location', '').strip()
-        model = request.form.get('model', '').strip()
-        department = request.form.get('department', '').strip()
-        notes = request.form.get('notes', '').strip()
-        
-        # Validation
-        errors = []
-        if not name:
-            errors.append('Printer name is required')
-        
-        if not ip:
-            errors.append('IP address is required')
-        else:
-            import ipaddress
-            try:
-                ipaddress.ip_address(ip)
-            except ValueError:
-                errors.append('Invalid IP address format')
-            
-            if registry.ip_exists(ip, exclude_id=printer_id):
-                errors.append('IP address already in use by another printer')
-        
-        # Prevent IP change if redirect is active
-        if (has_redirect or is_target) and ip != printer.ip:
-            errors.append('Cannot change IP while redirect is active')
-        
-        if errors:
-            for error in errors:
-                flash(error, 'error')
-            return render_template('printer_form.html',
-                                 mode='edit',
-                                 printer={'id': printer_id, 'name': name, 'ip': ip,
-                                         'location': location, 'model': model,
-                                         'department': department, 'notes': notes},
-                                 has_redirect=has_redirect,
-                                 is_target=is_target)
-        
-        old_ip = printer.ip
-        
-        # Update printer
-        updated_printer = Printer(
-            id=printer_id,
-            name=name,
-            ip=ip,
-            protocols=printer.protocols,
-            location=location,
-            model=model,
-            department=department,
-            notes=notes
-        )
-        
-        if registry.update_printer(updated_printer):
-            AuditLog.log(
-                username=current_user.username,
-                action="PRINTER_UPDATED",
-                source_printer_id=printer_id,
-                source_ip=ip,
-                details=f"Updated printer: {name}" + (f" (IP changed: {old_ip} -> {ip})" if old_ip != ip else ""),
-                success=True
-            )
-            flash(f'Printer "{name}" updated successfully', 'success')
-            return redirect(url_for('main.manage_printers'))
-        else:
-            flash('Failed to update printer', 'error')
-    
-    return render_template('printer_form.html',
-                         mode='edit',
-                         printer=printer.to_dict(),
-                         has_redirect=has_redirect,
-                         is_target=is_target)
+def api_role_required(*roles):
+    """Decorator to require specific roles for API routes."""
+    def decorator(fn):
+        @wraps(fn)
+        @api_auth_required
+        def wrapper(*args, **kwargs):
+            user_role = g.api_claims.get('role', '')
+            if user_role not in roles:
+                return jsonify({'error': 'Insufficient permissions'}), 403
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
-@main_bp.route('/printers/<printer_id>/delete', methods=['POST'])
-@login_required
-@role_required('admin')
-def delete_printer(printer_id):
-    """Delete a printer."""
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-    
-    if not printer:
-        flash('Printer not found', 'error')
-        return redirect(url_for('main.manage_printers'))
-    
-    # Check for active redirects
-    if ActiveRedirect.get_by_source_printer(printer_id):
-        flash('Cannot delete printer with active redirect', 'error')
-        return redirect(url_for('main.manage_printers'))
-    
-    if ActiveRedirect.is_target_in_use(printer_id):
-        flash('Cannot delete printer that is a redirect target', 'error')
-        return redirect(url_for('main.manage_printers'))
-    
-    printer_name = printer.name
-    printer_ip = printer.ip
-    
-    if registry.delete_printer(printer_id):
-        # Stop background services if no printers remain
-        if not registry.has_printers():
-            try:
-                from app.health_check import stop_health_checks
-                stop_health_checks()
+# ============================================================================
+# JWT Authentication API Routes
+# ============================================================================
 
-                from app.job_monitor import get_job_monitor
-                monitor = get_job_monitor()
-                if monitor.is_running():
-                    monitor.stop()
-            except Exception as e:
-                current_app.logger.error(f"Failed to stop background services after delete: {e}")
-
-        AuditLog.log(
-            username=current_user.username,
-            action="PRINTER_DELETED",
-            source_printer_id=printer_id,
-            source_ip=printer_ip,
-            details=f"Deleted printer: {printer_name}",
-            success=True
-        )
-        flash(f'Printer "{printer_name}" deleted successfully', 'success')
-    else:
-        flash('Failed to delete printer', 'error')
+@api_bp.route('/auth/login', methods=['POST'])
+def api_auth_login():
+    """Authenticate user and return JWT tokens."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
     
-    return redirect(url_for('main.manage_printers'))
-
-
-@main_bp.route('/printers/discover', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def discover_printers():
-    """Discover printers on the network."""
-    if request.method == 'POST':
-        network = request.form.get('network', '').strip() or None
-        single_ip = request.form.get('single_ip', '').strip() or None
-        
-        discovery = get_discovery()
-        
-        if single_ip:
-            # Scan single IP
-            discovered = discovery.scan_single_ip(single_ip)
-        else:
-            # Full network scan
-            discovered = discovery.discover_all(network_cidr=network, timeout=15)
-        
-        # Filter out already registered printers
-        registry = get_registry()
-        existing_ips = {p.ip for p in registry.get_all()}
-        new_printers = [p for p in discovered if p.ip not in existing_ips]
-        
-        return render_template('discover_printers.html',
-                             discovered=new_printers,
-                             existing_count=len(discovered) - len(new_printers),
-                             network=network)
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
     
-    return render_template('discover_printers.html', discovered=None)
-
-
-@main_bp.route('/printers/import', methods=['POST'])
-@login_required
-@role_required('admin')
-def import_discovered_printer():
-    """Import a discovered printer."""
-    registry = get_registry()
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
     
-    ip = request.form.get('ip', '').strip()
-    name = request.form.get('name', '').strip() or f"Printer at {ip}"
-    model = request.form.get('model', '').strip()
-    location = request.form.get('location', '').strip()
+    client_ip = request.remote_addr
+    user, error = authenticate_user(username, password, client_ip)
     
-    if not ip:
-        flash('IP address is required', 'error')
-        return redirect(url_for('main.discover_printers'))
+    if user is None:
+        return jsonify({'error': error}), 401
     
-    # Generate printer ID from name
-    import re
-    printer_id = re.sub(r'[^a-z0-9-]', '-', name.lower())
-    printer_id = re.sub(r'-+', '-', printer_id).strip('-')
-    
-    # Ensure unique ID
-    base_id = printer_id
-    counter = 1
-    while registry.id_exists(printer_id):
-        printer_id = f"{base_id}-{counter}"
-        counter += 1
-    
-    if registry.ip_exists(ip):
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return {'success': False, 'message': 'Printer with this IP already exists'}, 400
-        flash('Printer with this IP already exists', 'error')
-        return redirect(url_for('main.discover_printers'))
-    
-    printer = Printer(
-        id=printer_id,
-        name=name,
-        ip=ip,
-        protocols=['raw'],
-        location=location,
-        model=model,
-        department='',
-        notes='Imported via auto-discovery'
+    access_token = create_access_token(
+        identity=str(user.id),
+        additional_claims={
+            'username': user.username,
+            'role': user.role
+        }
     )
+    refresh_token = create_refresh_token(identity=str(user.id))
     
-    if registry.add_printer(printer):
-        AuditLog.log(
-            username=current_user.username,
-            action="PRINTER_IMPORTED",
-            source_printer_id=printer_id,
-            source_ip=ip,
-            details=f"Imported discovered printer: {name}",
-            success=True
-        )
-        # Return JSON for AJAX requests
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return {'success': True, 'message': f'Printer "{name}" imported successfully', 'ip': ip}
-        flash(f'Printer "{name}" imported successfully', 'success')
-    else:
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return {'success': False, 'message': 'Failed to import printer'}, 400
-        flash('Failed to import printer', 'error')
+    return jsonify({
+        'access_token': access_token,
+        'refresh_token': refresh_token,
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'role': user.role
+        }
+    })
+
+
+@api_bp.route('/auth/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def api_auth_refresh():
+    """Refresh access token using refresh token."""
+    user_id = get_jwt_identity()
+    user = User.get_by_id(int(user_id)) if user_id is not None else None
     
-    return redirect(url_for('main.discover_printers'))
+    if not user or not user.is_active:
+        return jsonify({'error': 'User not found or inactive'}), 401
+    
+    access_token = create_access_token(
+        identity=str(user.id),
+        additional_claims={
+            'username': user.username,
+            'role': user.role
+        }
+    )
+    return jsonify({'access_token': access_token})
 
 
-# ============================================================================
-# Authentication Routes
-# ============================================================================
+@api_bp.route('/auth/me')
+@jwt_required()
+def api_auth_me():
+    """Get current user info from JWT token."""
+    user_id = get_jwt_identity()
+    user = User.get_by_id(int(user_id)) if user_id is not None else None
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'role': user.role,
+        'is_active': user.is_active,
+        'last_login': _serialize_timestamp(user.last_login)
+    })
 
-@auth_bp.route('/login', methods=['GET', 'POST'])
-def login():
-    """Login page."""
-    # Redirect to setup if no users exist yet
+
+@api_bp.route('/auth/logout', methods=['POST'])
+def api_auth_logout():
+    """Logout endpoint (client should discard tokens)."""
+    return jsonify({'message': 'Successfully logged out'})
+
+
+@api_bp.route('/auth/setup', methods=['GET', 'POST'])
+def api_auth_setup():
+    """Check if setup is needed or create initial admin."""
     from app.models import get_db_connection
+    from app.auth import create_initial_admin
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM users")
     user_count = cursor.fetchone()[0]
     conn.close()
     
-    if user_count == 0:
-        return redirect(url_for('auth.initial_setup'))
+    if request.method == 'GET':
+        return jsonify({'setup_required': user_count == 0})
     
-    if current_user.is_authenticated:
-        return redirect(url_for('main.dashboard'))
-    
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        client_ip = request.remote_addr
-        
-        user, error = authenticate_user(username, password, client_ip)
-        
-        if user:
-            login_user(user, remember=False)
-            next_page = request.args.get('next')
-            if next_page and next_page.startswith('/'):
-                return redirect(next_page)
-            return redirect(url_for('main.dashboard'))
-        else:
-            flash(error, 'error')
-    
-    return render_template('login.html')
-
-
-@auth_bp.route('/logout')
-@login_required
-def logout():
-    """Logout."""
-    AuditLog.log(
-        username=current_user.username,
-        action="LOGOUT",
-        success=True
-    )
-    logout_user()
-    flash('You have been logged out', 'info')
-    return redirect(url_for('auth.login'))
-
-
-@auth_bp.route('/setup', methods=['GET', 'POST'])
-def initial_setup():
-    """Initial setup to create admin user."""
-    from app.models import get_db_connection
-    
-    # Check if any users exist
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM users")
-    user_count = cursor.fetchone()[0]
-    conn.close()
-    
+    # POST - create initial admin
     if user_count > 0:
-        return redirect(url_for('auth.login'))
+        return jsonify({'error': 'Setup already completed'}), 400
     
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        confirm_password = request.form.get('confirm_password', '')
-        
-        if not username:
-            flash('Username is required', 'error')
-        elif password != confirm_password:
-            flash('Passwords do not match', 'error')
-        else:
-            is_valid, error = validate_password_strength(password)
-            if not is_valid:
-                flash(error, 'error')
-            else:
-                success, message = create_initial_admin(username, password)
-                if success:
-                    flash('Admin user created. Please log in.', 'success')
-                    return redirect(url_for('auth.login'))
-                else:
-                    flash(message, 'error')
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
     
-    return render_template('setup.html')
-
-
-@auth_bp.route('/change-password', methods=['GET', 'POST'])
-@login_required
-def change_password():
-    """Change current user's password."""
-    import bcrypt
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
     
-    if request.method == 'POST':
-        current_password = request.form.get('current_password', '')
-        new_password = request.form.get('new_password', '')
-        confirm_password = request.form.get('confirm_password', '')
-        
-        # Verify current password
-        if not bcrypt.checkpw(current_password.encode('utf-8'), 
-                             current_user.password_hash.encode('utf-8')):
-            flash('Current password is incorrect', 'error')
-            return render_template('change_password.html')
-        
-        # Check new passwords match
-        if new_password != confirm_password:
-            flash('New passwords do not match', 'error')
-            return render_template('change_password.html')
-        
-        # Validate password strength
-        is_valid, error = validate_password_strength(new_password)
-        if not is_valid:
-            flash(error, 'error')
-            return render_template('change_password.html')
-        
-        # Update password
-        new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        current_user.update_password(new_hash)
-        
-        AuditLog.log(
-            username=current_user.username,
-            action="PASSWORD_CHANGED",
-            details="User changed their password",
-            success=True
-        )
-        
-        flash('Password changed successfully', 'success')
-        return redirect(url_for('main.dashboard'))
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
     
-    return render_template('change_password.html')
+    is_valid, error = validate_password_strength(password)
+    if not is_valid:
+        return jsonify({'error': error}), 400
+    
+    success, message = create_initial_admin(username, password)
+    if success:
+        return jsonify({'message': 'Admin user created successfully'})
+    else:
+        return jsonify({'error': message}), 400
 
 
 # ============================================================================
-# API Routes
+# App Info API Routes
+# ============================================================================
+
+@api_bp.route('/info')
+def api_info():
+    """Get application info (version, etc.)."""
+    from app.version import __version__, VERSION_STRING
+    return jsonify({
+        'version': __version__,
+        'version_string': VERSION_STRING,
+        'app_name': 'Printer Proxy'
+    })
+
+
+# ============================================================================
+# Printers API Routes
 # ============================================================================
 
 @api_bp.route('/printers')
-@login_required
+@api_auth_required
 def api_printers():
     """Get all printers with status."""
     registry = get_registry()
@@ -812,7 +239,7 @@ def api_printers():
 
 
 @api_bp.route('/printers/<printer_id>')
-@login_required
+@api_auth_required
 def api_printer(printer_id):
     """Get a specific printer with status."""
     registry = get_registry()
@@ -824,8 +251,187 @@ def api_printer(printer_id):
     return jsonify(registry.get_printer_status(printer))
 
 
+@api_bp.route('/printers', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_printer_create():
+    """Create a new printer."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    
+    name = data.get('name', '').strip()
+    ip = data.get('ip', '').strip()
+    location = data.get('location', '').strip()
+    model = data.get('model', '').strip()
+    department = data.get('department', '').strip()
+    notes = data.get('notes', '').strip()
+
+    protocols_raw = data.get('protocols')
+    if isinstance(protocols_raw, str):
+        protocols = [p.strip() for p in protocols_raw.split(',') if p.strip()]
+    elif isinstance(protocols_raw, list):
+        protocols = [str(p).strip() for p in protocols_raw if str(p).strip()]
+    else:
+        protocols = ['raw']
+
+    allowed_protocols = set(SUPPORTED_PROTOCOLS.keys())
+    protocols = [p for p in protocols if p in allowed_protocols]
+    if not protocols:
+        protocols = ['raw']
+    
+    if not name or not ip:
+        return jsonify({'error': 'Name and IP are required'}), 400
+    
+    registry = get_registry()
+    
+    for p in registry.get_all():
+        if p.ip == ip:
+            return jsonify({'error': 'A printer with this IP already exists'}), 400
+    
+    try:
+        printer = Printer(
+            id=data.get('id') or uuid4().hex,
+            name=name,
+            ip=ip,
+            protocols=protocols,
+            location=location,
+            model=model,
+            department=department,
+            notes=notes
+        )
+        success = registry.add_printer(printer)
+        if not success:
+            return jsonify({'error': 'Failed to create printer'}), 500
+        
+        AuditLog.log(
+            username=g.api_user.username,
+            action='PRINTER_CREATED',
+            details=f"Created printer '{name}' ({ip})",
+            success=True
+        )
+        
+        return jsonify({
+            'id': printer.id,
+            'name': printer.name,
+            'ip': printer.ip,
+            'location': printer.location,
+            'model': printer.model,
+            'protocols': printer.protocols,
+            'department': printer.department,
+            'notes': printer.notes
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/printers/<printer_id>', methods=['PUT'])
+@api_role_required('admin', 'operator')
+def api_printer_update(printer_id):
+    """Update a printer."""
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+    
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    
+    name = data.get('name', printer.name).strip()
+    ip = data.get('ip', printer.ip).strip()
+    location = data.get('location', printer.location or '').strip()
+    model = data.get('model', printer.model or '').strip()
+    department = data.get('department', printer.department or '').strip()
+    notes = data.get('notes', printer.notes or '').strip()
+
+    protocols_raw = data.get('protocols', printer.protocols)
+    if isinstance(protocols_raw, str):
+        protocols = [p.strip() for p in protocols_raw.split(',') if p.strip()]
+    elif isinstance(protocols_raw, list):
+        protocols = [str(p).strip() for p in protocols_raw if str(p).strip()]
+    else:
+        protocols = printer.protocols
+
+    allowed_protocols = set(SUPPORTED_PROTOCOLS.keys())
+    protocols = [p for p in protocols if p in allowed_protocols]
+    if not protocols:
+        protocols = ['raw']
+    
+    if not name or not ip:
+        return jsonify({'error': 'Name and IP are required'}), 400
+    
+    for p in registry.get_all():
+        if p.ip == ip and p.id != printer_id:
+            return jsonify({'error': 'A printer with this IP already exists'}), 400
+    
+    try:
+        printer.name = name
+        printer.ip = ip
+        printer.location = location
+        printer.model = model
+        printer.department = department
+        printer.notes = notes
+        printer.protocols = protocols
+        success = registry.update_printer(printer)
+        if not success:
+            return jsonify({'error': 'Failed to update printer'}), 500
+        
+        AuditLog.log(
+            username=g.api_user.username,
+            action='PRINTER_UPDATED',
+            details=f"Updated printer '{name}' ({ip})",
+            success=True
+        )
+        
+        return jsonify({
+            'id': printer.id,
+            'name': printer.name,
+            'ip': printer.ip,
+            'location': printer.location,
+            'model': printer.model,
+            'protocols': printer.protocols,
+            'department': printer.department,
+            'notes': printer.notes
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/printers/<printer_id>', methods=['DELETE'])
+@api_role_required('admin')
+def api_printer_delete(printer_id):
+    """Delete a printer."""
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+    
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+    
+    redirect_obj = ActiveRedirect.get_by_source_printer(printer_id)
+    if redirect_obj:
+        return jsonify({'error': 'Cannot delete printer with active redirect'}), 400
+    
+    if ActiveRedirect.is_target_in_use(printer_id):
+        return jsonify({'error': 'Cannot delete printer that is a redirect target'}), 400
+    
+    try:
+        registry.delete(printer_id)
+        
+        AuditLog.log(
+            username=g.api_user.username,
+            action='PRINTER_DELETED',
+            details=f"Deleted printer '{printer.name}' ({printer.ip})",
+            success=True
+        )
+        
+        return jsonify({'message': f"Printer '{printer.name}' deleted"})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/printers/<printer_id>/check')
-@login_required
+@api_auth_required
 def api_check_printer(printer_id):
     """Quick reachability check for a printer."""
     registry = get_registry()
@@ -846,90 +452,10 @@ def api_check_printer(printer_id):
     })
 
 
-@api_bp.route('/redirects')
-@login_required
-@role_required('admin', 'operator')
-def api_redirects():
-    """Get all active redirects."""
-    redirects = ActiveRedirect.get_all()
-    return jsonify([{
-        'id': r.id,
-        'source_printer_id': r.source_printer_id,
-        'source_ip': r.source_ip,
-        'target_printer_id': r.target_printer_id,
-        'target_ip': r.target_ip,
-        'protocol': r.protocol,
-        'port': r.port,
-        'enabled_at': str(r.enabled_at),
-        'enabled_by': r.enabled_by
-    } for r in redirects])
-
-
-@api_bp.route('/network/status')
-@login_required
-@role_required('admin')
-def api_network_status():
-    """Get current network status (secondary IPs and NAT rules)."""
-    network = get_network_manager()
-    
-    success, ips = network.get_secondary_ips()
-    success2, nat_rules = network.get_nat_rules()
-    
-    return jsonify({
-        'secondary_ips': ips if success else [],
-        'nat_rules': nat_rules if success2 else 'Unable to retrieve'
-    })
-
-
-# ============================================================================
-# Server-Sent Events (SSE) for Live Updates
-# ============================================================================
-
-@api_bp.route('/sse/printer/<printer_id>/queue')
-@login_required
-def sse_printer_queue(printer_id):
-    """SSE endpoint for live print queue updates."""
-    from flask import Response
-    from app.print_queue import get_print_queue
-    import json
-    import time
-    
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-    
-    if not printer:
-        return jsonify({'error': 'Printer not found'}), 404
-    
-    def generate():
-        while True:
-            try:
-                queue = get_print_queue(printer.ip)
-                data = {
-                    'queue': [job.to_dict() for job in queue],
-                    'count': len(queue),
-                    'timestamp': time.time()
-                }
-                yield f"data: {json.dumps(data)}\n\n"
-                time.sleep(5)  # Update every 5 seconds
-            except GeneratorExit:
-                break
-            except Exception as e:
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                time.sleep(10)
-    
-    return Response(generate(), mimetype='text/event-stream',
-                   headers={'Cache-Control': 'no-cache',
-                           'Connection': 'keep-alive'})
-
-
-# ============================================================================
-# Async Data Loading Endpoints (for fast UI)
-# ============================================================================
-
 @api_bp.route('/printers/<printer_id>/stats')
-@login_required
+@api_auth_required
 def api_printer_stats(printer_id):
-    """Get SNMP stats for a printer (async loading)."""
+    """Get SNMP stats for a printer."""
     from app.printer_stats import get_printer_stats, get_toner_levels
     
     registry = get_registry()
@@ -948,9 +474,9 @@ def api_printer_stats(printer_id):
 
 
 @api_bp.route('/printers/<printer_id>/health')
-@login_required
+@api_auth_required
 def api_printer_health(printer_id):
-    """Get health status for a printer (from cache)."""
+    """Get health status for a printer."""
     from app.health_check import get_printer_health, get_printer_health_history
     
     health = get_printer_health(printer_id)
@@ -963,17 +489,15 @@ def api_printer_health(printer_id):
 
 
 @api_bp.route('/printers/<printer_id>/refresh')
-@login_required
-@role_required('admin', 'operator')
+@api_role_required('admin', 'operator')
 def api_printer_refresh(printer_id):
-    """Force a live status check for a printer (bypasses cache)."""
+    """Force a live status check for a printer."""
     registry = get_registry()
     printer = registry.get_by_id(printer_id)
     
     if not printer:
         return jsonify({'error': 'Printer not found'}), 404
     
-    # Do a live check and update cache
     from app.health_check import HealthChecker
     checker = HealthChecker()
     result = checker.check_printer(printer_id, printer.ip)
@@ -989,12 +513,413 @@ def api_printer_refresh(printer_id):
     })
 
 
+# ============================================================================
+# Redirects API Routes
+# ============================================================================
+
+@api_bp.route('/redirects')
+@api_role_required('admin', 'operator')
+def api_redirects():
+    """Get all active redirects."""
+    redirects = ActiveRedirect.get_all()
+    return jsonify([{
+        'id': r.id,
+        'source_printer_id': r.source_printer_id,
+        'source_ip': r.source_ip,
+        'target_printer_id': r.target_printer_id,
+        'target_ip': r.target_ip,
+        'protocol': r.protocol,
+        'port': r.port,
+        'enabled_at': str(r.enabled_at),
+        'enabled_by': r.enabled_by
+    } for r in redirects])
+
+
+@api_bp.route('/redirects', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_redirect_create():
+    """Create a new redirect."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    
+    source_printer_id = data.get('source_printer_id')
+    target_printer_id = data.get('target_printer_id')
+    
+    if not source_printer_id or not target_printer_id:
+        return jsonify({'error': 'Source and target printer IDs are required'}), 400
+    
+    registry = get_registry()
+    network = get_network_manager()
+    
+    source_printer = registry.get_by_id(source_printer_id)
+    if not source_printer:
+        return jsonify({'error': 'Source printer not found'}), 404
+    
+    target_printer = registry.get_by_id(target_printer_id)
+    if not target_printer:
+        return jsonify({'error': 'Target printer not found'}), 404
+    
+    if source_printer.ip == target_printer.ip:
+        return jsonify({'error': 'Source and target cannot be the same'}), 400
+    
+    existing = ActiveRedirect.get_by_source_printer(source_printer_id)
+    if existing:
+        return jsonify({'error': 'This printer already has an active redirect'}), 400
+    
+    if ActiveRedirect.is_target_in_use(target_printer_id):
+        return jsonify({'error': 'Target printer is already in use'}), 400
+    
+    success, message = network.enable_redirect(
+        source_ip=source_printer.ip,
+        target_ip=target_printer.ip,
+        port=DEFAULT_PORT
+    )
+    
+    if success:
+        redirect_obj = ActiveRedirect.create(
+            source_printer_id=source_printer_id,
+            source_ip=source_printer.ip,
+            target_printer_id=target_printer_id,
+            target_ip=target_printer.ip,
+            protocol='raw',
+            port=DEFAULT_PORT,
+            enabled_by=g.api_user.username
+        )
+        
+        AuditLog.log(
+            username=g.api_user.username,
+            action="REDIRECT_ENABLED",
+            source_printer_id=source_printer_id,
+            source_ip=source_printer.ip,
+            target_printer_id=target_printer_id,
+            target_ip=target_printer.ip,
+            details=f"Redirecting {source_printer.name} to {target_printer.name}",
+            success=True
+        )
+        
+        return jsonify({
+            'id': redirect_obj.id,
+            'source_printer_id': redirect_obj.source_printer_id,
+            'target_printer_id': redirect_obj.target_printer_id,
+            'message': f'Redirect enabled: {source_printer.name} → {target_printer.name}'
+        }), 201
+    else:
+        return jsonify({'error': message}), 500
+
+
+@api_bp.route('/redirects/<int:redirect_id>', methods=['DELETE'])
+@api_role_required('admin', 'operator')
+def api_redirect_delete(redirect_id):
+    """Remove a redirect."""
+    redirect_obj = ActiveRedirect.get_by_id(redirect_id)
+    if not redirect_obj:
+        return jsonify({'error': 'Redirect not found'}), 404
+    
+    network = get_network_manager()
+    
+    success, message = network.disable_redirect(
+        source_ip=redirect_obj.source_ip,
+        target_ip=redirect_obj.target_ip,
+        port=redirect_obj.port
+    )
+    
+    if success:
+        ActiveRedirect.delete(redirect_obj.id)
+        
+        AuditLog.log(
+            username=g.api_user.username,
+            action="REDIRECT_DISABLED",
+            source_printer_id=redirect_obj.source_printer_id,
+            source_ip=redirect_obj.source_ip,
+            target_printer_id=redirect_obj.target_printer_id,
+            target_ip=redirect_obj.target_ip,
+            details="Redirect removed",
+            success=True
+        )
+        
+        return jsonify({'message': 'Redirect removed'})
+    else:
+        return jsonify({'error': message}), 500
+
+
+# ============================================================================
+# Users API Routes
+# ============================================================================
+
+@api_bp.route('/users')
+@api_role_required('admin')
+def api_users():
+    """Get all users."""
+    users = User.get_all()
+    return jsonify([{
+        'id': u.id,
+        'username': u.username,
+        'role': u.role,
+        'is_active': u.is_active,
+        'last_login': _serialize_timestamp(u.last_login),
+        'created_at': _serialize_timestamp(getattr(u, 'created_at', None))
+    } for u in users])
+
+
+@api_bp.route('/users', methods=['POST'])
+@api_role_required('admin')
+def api_user_create():
+    """Create a new user."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    role = data.get('role', 'viewer').strip()
+    is_active = data.get('is_active', True)
+    
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+    
+    if User.get_by_username(username):
+        return jsonify({'error': 'Username already exists'}), 400
+    
+    if role not in ['admin', 'operator', 'viewer']:
+        return jsonify({'error': 'Invalid role'}), 400
+    
+    is_valid, error = validate_password_strength(password)
+    if not is_valid:
+        return jsonify({'error': error}), 400
+    
+    try:
+        user = User.create(username, hash_password(password), role=role, is_active=is_active)
+        AuditLog.log(
+            username=g.api_user.username,
+            action='USER_CREATED',
+            details=f"Created user '{username}' with role '{role}'",
+            success=True
+        )
+        return jsonify({
+            'id': user.id,
+            'username': user.username,
+            'role': user.role,
+            'is_active': user.is_active
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/users/<int:user_id>')
+@api_role_required('admin')
+def api_user_get(user_id: int):
+    """Get a specific user."""
+    user = User.get_by_id(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'role': user.role,
+        'is_active': user.is_active,
+        'last_login': _serialize_timestamp(user.last_login),
+        'created_at': _serialize_timestamp(getattr(user, 'created_at', None))
+    })
+
+
+@api_bp.route('/users/<int:user_id>', methods=['PUT'])
+@api_role_required('admin')
+def api_user_update(user_id: int):
+    """Update a user."""
+    user = User.get_by_id(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    
+    role = data.get('role', user.role)
+    is_active = data.get('is_active', user.is_active)
+    new_password = data.get('password')
+    
+    if role not in ['admin', 'operator', 'viewer']:
+        return jsonify({'error': 'Invalid role'}), 400
+    
+    admins = [u for u in User.get_all() if u.role == 'admin']
+    if user.role == 'admin' and role != 'admin' and len(admins) <= 1:
+        return jsonify({'error': 'At least one admin is required'}), 400
+    
+    current_api_user_id = g.api_user.id
+    if user.id == current_api_user_id and role != 'admin':
+        return jsonify({'error': 'You cannot remove your own admin access'}), 400
+    if user.id == current_api_user_id and not is_active:
+        return jsonify({'error': 'You cannot disable your own account'}), 400
+    
+    if new_password:
+        is_valid, error = validate_password_strength(new_password)
+        if not is_valid:
+            return jsonify({'error': error}), 400
+        user.update_password(hash_password(new_password))
+    
+    user.update_role(role)
+    user.set_active(is_active)
+    
+    AuditLog.log(
+        username=g.api_user.username,
+        action='USER_UPDATED',
+        details=f"Updated user '{user.username}' (role={role}, active={is_active})",
+        success=True
+    )
+    
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'role': user.role,
+        'is_active': user.is_active
+    })
+
+
+@api_bp.route('/users/<int:user_id>', methods=['DELETE'])
+@api_role_required('admin')
+def api_user_delete(user_id: int):
+    """Delete a user."""
+    user = User.get_by_id(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    current_api_user_id = g.api_user.id
+    if user.id == current_api_user_id:
+        return jsonify({'error': 'You cannot delete your own account'}), 400
+    
+    admins = [u for u in User.get_all() if u.role == 'admin']
+    if user.role == 'admin' and len(admins) <= 1:
+        return jsonify({'error': 'At least one admin is required'}), 400
+    
+    if User.delete_by_id(user.id):
+        AuditLog.log(
+            username=g.api_user.username,
+            action='USER_DELETED',
+            details=f"Deleted user '{user.username}'",
+            success=True
+        )
+        return jsonify({'message': f"User '{user.username}' deleted"})
+    else:
+        return jsonify({'error': 'Failed to delete user'}), 500
+
+
+# ============================================================================
+# Audit Log API Routes
+# ============================================================================
+
+@api_bp.route('/audit-logs')
+@api_role_required('admin')
+def api_audit_logs():
+    """Get audit logs with optional filtering."""
+    limit = request.args.get('limit', 100, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    action = request.args.get('action')
+    username = request.args.get('username')
+    
+    logs = AuditLog.get_recent(limit=limit, offset=offset, action=action, username=username)
+    
+    return jsonify([{
+        'id': log.id,
+        'timestamp': log.timestamp.isoformat() if log.timestamp else None,
+        'username': log.username,
+        'action': log.action,
+        'details': log.details,
+        'source_printer_id': log.source_printer_id,
+        'target_printer_id': log.target_printer_id,
+        'success': log.success,
+        'error_message': log.error_message
+    } for log in logs])
+
+
+# ============================================================================
+# Discovery API Routes
+# ============================================================================
+
+@api_bp.route('/discovery/scan', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_discovery_scan():
+    """Start a network scan for printers."""
+    discovery = get_discovery()
+    
+    data = request.get_json() or {}
+    subnet = data.get('subnet')
+    
+    try:
+        if subnet:
+            # If a CIDR is provided, scan the network; otherwise treat as single IP.
+            if '/' in subnet:
+                printers = discovery.discover_all(network_cidr=subnet)
+            else:
+                printers = discovery.scan_single_ip(subnet)
+        else:
+            printers = discovery.discover_all()
+        return jsonify({
+            'success': True,
+            'printers': [{
+                'ip': p.ip,
+                'name': p.name,
+                'model': p.model,
+                'location': p.location,
+                'discovery_method': p.discovery_method,
+                'hostname': p.hostname,
+                'tcp_9100_open': p.tcp_9100_open,
+                'snmp_available': p.snmp_available
+            } for p in printers]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================================
+# Network Status API Routes
+# ============================================================================
+
+@api_bp.route('/network/status')
+@api_role_required('admin')
+def api_network_status():
+    """Get current network status (secondary IPs and NAT rules)."""
+    network = get_network_manager()
+    
+    success, ips = network.get_secondary_ips()
+    success2, nat_rules = network.get_nat_rules()
+    
+    return jsonify({
+        'secondary_ips': ips if success else [],
+        'nat_rules': nat_rules if success2 else 'Unable to retrieve'
+    })
+
+
+# ============================================================================
+# Dashboard API Routes
+# ============================================================================
+
 @api_bp.route('/dashboard/status')
-@login_required
+@api_auth_required
 def api_dashboard_status():
-    """Get all printer statuses for dashboard (fast, from cache)."""
+    """Get all printer statuses for dashboard."""
     registry = get_registry()
     return jsonify(registry.get_all_statuses(use_cache=True))
+
+
+@api_bp.route('/dashboard/stats')
+@api_auth_required
+def api_dashboard_stats():
+    """Get dashboard statistics."""
+    registry = get_registry()
+    printers = registry.get_all_statuses()
+    redirects = ActiveRedirect.get_all()
+    
+    online_count = sum(1 for p in printers if p.get('is_online'))
+    offline_count = len(printers) - online_count
+    
+    return jsonify({
+        'total_printers': len(printers),
+        'online_printers': online_count,
+        'offline_printers': offline_count,
+        'active_redirects': len(redirects)
+    })
 
 
 # ============================================================================
@@ -1003,15 +928,14 @@ def api_dashboard_status():
 
 @api_bp.route('/update/status')
 def api_update_status():
-    """Get current update status. No login required so updating page can poll."""
+    """Get current update status."""
     from app.updater import get_update_manager
     manager = get_update_manager()
     return jsonify(manager.get_state())
 
 
 @api_bp.route('/update/check', methods=['POST'])
-@login_required
-@role_required('admin')
+@api_role_required('admin')
 def api_update_check():
     """Force an update check."""
     from app.updater import get_update_manager
@@ -1033,20 +957,17 @@ def api_update_check():
 
 
 @api_bp.route('/update/start', methods=['POST'])
-@login_required  
-@role_required('admin')
+@api_role_required('admin')
 def api_update_start():
     """Start the update process."""
     from app.updater import get_update_manager
-    from app.models import AuditLog
     
     manager = get_update_manager()
     success, message = manager.start_update()
     
     if success:
-        # Log the update action
         AuditLog.log(
-            username=current_user.username if current_user.is_authenticated else 'system',
+            username=g.api_user.username,
             action='UPDATE_STARTED',
             details=f"Update to version {manager._state.available_version} initiated"
         )
@@ -1057,199 +978,21 @@ def api_update_start():
     })
 
 
-@main_bp.route('/settings')
-@login_required
-@role_required('admin')
-def settings_page():
-    """Settings page for application configuration."""
-    from app.settings import get_settings_manager
-    settings = get_settings_manager().get_all()
-    return render_template('settings.html', settings=settings)
-
-
-# =========================================================================
-# User Management (RBAC)
-# =========================================================================
-
-@main_bp.route('/users')
-@login_required
-@role_required('admin')
-def user_management():
-    """User management list for admins."""
-    users = User.get_all()
-    return render_template('user_management.html', users=users)
-
-
-@main_bp.route('/users/add', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def user_add():
-    """Create a new user."""
-    password_requirements = _get_password_requirements()
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        confirm_password = request.form.get('confirm_password', '')
-        role = request.form.get('role', 'viewer').strip()
-        is_active = request.form.get('is_active') == 'on'
-
-        if not username:
-            flash('Username is required', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
-
-        if User.get_by_username(username):
-            flash('Username already exists', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
-
-        if role not in ['admin', 'operator', 'viewer']:
-            flash('Invalid role selected', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
-
-        if password != confirm_password:
-            flash('Passwords do not match', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
-
-        is_valid, error = validate_password_strength(password)
-        if not is_valid:
-            flash(error, 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
-
-        try:
-            User.create(username, hash_password(password), role=role, is_active=is_active)
-        except Exception as e:
-            current_app.logger.error(f"Failed to create user '{username}': {e}")
-            flash('Failed to create user. Check logs for details.', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
-
-        AuditLog.log(
-            username=current_user.username,
-            action='USER_CREATED',
-            details=f"Created user '{username}' with role '{role}'",
-            success=True
-        )
-        flash(f"User '{username}' created", 'success')
-        return redirect(url_for('main.user_management'))
-
-    return render_template('user_form.html', mode='add', form_data={}, password_requirements=password_requirements)
-
-
-@main_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def user_edit(user_id: int):
-    """Edit an existing user."""
-    user = User.get_by_id(user_id)
-    if not user:
-        flash('User not found', 'error')
-        return redirect(url_for('main.user_management'))
-
-    password_requirements = _get_password_requirements()
-
-    if request.method == 'POST':
-        role = request.form.get('role', '').strip()
-        is_active = request.form.get('is_active') == 'on'
-        new_password = request.form.get('password', '')
-        confirm_password = request.form.get('confirm_password', '')
-
-        if role not in ['admin', 'operator', 'viewer']:
-            flash('Invalid role selected', 'error')
-            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
-
-        admins = [u for u in User.get_all() if u.role == 'admin']
-        if user.role == 'admin' and role != 'admin' and len(admins) <= 1:
-            flash('At least one admin is required', 'error')
-            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
-        if user.id == current_user.id and role != 'admin':
-            flash('You cannot remove your own admin access', 'error')
-            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
-        if user.id == current_user.id and not is_active:
-            flash('You cannot disable your own account', 'error')
-            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
-
-        if new_password or confirm_password:
-            if new_password != confirm_password:
-                flash('Passwords do not match', 'error')
-                return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
-            is_valid, error = validate_password_strength(new_password)
-            if not is_valid:
-                flash(error, 'error')
-                return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
-            user.update_password(hash_password(new_password))
-            AuditLog.log(
-                username=current_user.username,
-                action='USER_PASSWORD_RESET',
-                details=f"Reset password for '{user.username}'",
-                success=True
-            )
-
-        user.update_role(role)
-        user.set_active(is_active)
-        AuditLog.log(
-            username=current_user.username,
-            action='USER_UPDATED',
-            details=f"Updated user '{user.username}' (role={role}, active={is_active})",
-            success=True
-        )
-        flash(f"User '{user.username}' updated", 'success')
-        return redirect(url_for('main.user_management'))
-
-    return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
-
-
-@main_bp.route('/users/<int:user_id>/delete', methods=['POST'])
-@login_required
-@role_required('admin')
-def user_delete(user_id: int):
-    """Delete a user."""
-    user = User.get_by_id(user_id)
-    if not user:
-        flash('User not found', 'error')
-        return redirect(url_for('main.user_management'))
-
-    if user.id == current_user.id:
-        flash('You cannot delete your own account', 'error')
-        return redirect(url_for('main.user_management'))
-
-    admins = [u for u in User.get_all() if u.role == 'admin']
-    if user.role == 'admin' and len(admins) <= 1:
-        flash('At least one admin is required', 'error')
-        return redirect(url_for('main.user_management'))
-
-    if User.delete_by_id(user.id):
-        AuditLog.log(
-            username=current_user.username,
-            action='USER_DELETED',
-            details=f"Deleted user '{user.username}'",
-            success=True
-        )
-        flash(f"User '{user.username}' deleted", 'success')
-    else:
-        flash('Failed to delete user', 'error')
-
-    return redirect(url_for('main.user_management'))
-
-
-def _get_password_requirements():
-    """Build a list of password requirement strings for UI hints."""
-    requirements = [f"At least {MIN_PASSWORD_LENGTH} characters"]
-    if PASSWORD_REQUIRE_UPPERCASE:
-        requirements.append("At least one uppercase letter")
-    if PASSWORD_REQUIRE_LOWERCASE:
-        requirements.append("At least one lowercase letter")
-    if PASSWORD_REQUIRE_DIGIT:
-        requirements.append("At least one digit")
-    if PASSWORD_REQUIRE_SPECIAL:
-        requirements.append("At least one special character")
-    return requirements
-
-
 # ============================================================================
 # Settings API Routes  
 # ============================================================================
 
+@api_bp.route('/settings')
+@api_role_required('admin')
+def api_settings():
+    """Get all settings."""
+    from app.settings import get_settings_manager
+    settings = get_settings_manager().get_all()
+    return jsonify({'success': True, 'settings': settings})
+
+
 @api_bp.route('/settings/notifications/smtp', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
+@api_role_required('admin')
 def api_settings_smtp():
     """Get or update SMTP notification settings."""
     from app.settings import get_settings_manager
@@ -1257,32 +1000,26 @@ def api_settings_smtp():
     
     if request.method == 'GET':
         smtp_settings = manager.get('notifications.smtp', {})
-        # Don't expose the password
         smtp_settings = dict(smtp_settings)
         smtp_settings['password'] = '********' if smtp_settings.get('password') else ''
         return jsonify({'success': True, 'settings': smtp_settings})
     
-    # POST - update settings
     data = request.get_json() or {}
     
     try:
         current_smtp = manager.get('notifications.smtp', {})
         
-        # Update fields that were provided
         for field in ['enabled', 'host', 'port', 'username', 'from_address', 'to_addresses', 'use_tls', 'use_ssl']:
             if field in data:
                 current_smtp[field] = data[field]
         
-        # Only update password if a new one was provided
         if data.get('password'):
             current_smtp['password'] = data['password']
         
-        # Save the updated settings
         manager.set('notifications.smtp', current_smtp)
         
-        # Log the change
         AuditLog.log(
-            username=current_user.username,
+            username=g.api_user.username,
             action='SETTINGS_UPDATED',
             details='SMTP notification settings updated'
         )
@@ -1293,8 +1030,7 @@ def api_settings_smtp():
 
 
 @api_bp.route('/settings/notifications/smtp/test', methods=['POST'])
-@login_required
-@role_required('admin')
+@api_role_required('admin')
 def api_settings_smtp_test():
     """Send a test email using current SMTP settings."""
     from app.notifications import get_notification_manager
@@ -1304,7 +1040,7 @@ def api_settings_smtp_test():
     
     if success:
         AuditLog.log(
-            username=current_user.username,
+            username=g.api_user.username,
             action='SMTP_TEST',
             details='Test email sent successfully'
         )
@@ -1313,5 +1049,32 @@ def api_settings_smtp_test():
         'success': success,
         'message': message if success else None,
         'error': message if not success else None
+    })
+
+
+# ============================================================================
+# Password Requirements Helper
+# ============================================================================
+
+@api_bp.route('/auth/password-requirements')
+def api_password_requirements():
+    """Get password requirements for the frontend."""
+    requirements = [f"At least {MIN_PASSWORD_LENGTH} characters"]
+    if PASSWORD_REQUIRE_UPPERCASE:
+        requirements.append("At least one uppercase letter")
+    if PASSWORD_REQUIRE_LOWERCASE:
+        requirements.append("At least one lowercase letter")
+    if PASSWORD_REQUIRE_DIGIT:
+        requirements.append("At least one digit")
+    if PASSWORD_REQUIRE_SPECIAL:
+        requirements.append("At least one special character")
+    
+    return jsonify({
+        'requirements': requirements,
+        'min_length': MIN_PASSWORD_LENGTH,
+        'require_uppercase': PASSWORD_REQUIRE_UPPERCASE,
+        'require_lowercase': PASSWORD_REQUIRE_LOWERCASE,
+        'require_digit': PASSWORD_REQUIRE_DIGIT,
+        'require_special': PASSWORD_REQUIRE_SPECIAL
     })
 

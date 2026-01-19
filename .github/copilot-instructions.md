@@ -2,21 +2,31 @@
 
 ## Project Overview
 
-Printer Proxy is a Flask web application that redirects network print traffic via NAT/iptables. When a printer fails, clients continue printing to the same IP while traffic is forwarded to a working printer.
+Printer Proxy is a Flask + React web application that redirects network print traffic via NAT/iptables. When a printer fails, clients continue printing to the same IP while traffic is forwarded to a working printer.
 
 ## Architecture
 
 ### Core Components
 
-- **Flask App Factory**: [app/__init__.py](app/__init__.py) - Uses `create_app()` pattern with blueprints (`main_bp`, `auth_bp`, `api_bp`)
-- **Routes**: [app/routes.py](app/routes.py) - All web routes and API endpoints
+- **Flask App Factory**: [app/__init__.py](app/__init__.py) - Uses `create_app()` pattern with `api_bp` blueprint
+- **React Frontend**: [frontend/](frontend/) - Vite + React + TypeScript SPA with Tailwind CSS
+- **API Routes**: [app/routes.py](app/routes.py) - JSON API endpoints only (no templates)
 - **Models**: [app/models.py](app/models.py) - SQLite database with raw SQL (no ORM)
 - **Network Manager**: [app/network.py](app/network.py) - Calls privileged bash helper via sudo
 - **Network Helper**: [scripts/network_helper.sh](scripts/network_helper.sh) - Bash script for iptables/NAT operations (runs as root)
 
+### Frontend Stack
+
+- **React 18** with TypeScript
+- **Vite** for build tooling
+- **Tailwind CSS** with Supabase-inspired emerald theme
+- **TanStack Query** for data fetching
+- **React Router DOM** for client-side routing
+- **JWT Authentication** via flask-jwt-extended
+
 ### Data Flow for Redirects
 
-1. User creates redirect via web UI → [app/routes.py](app/routes.py#L126)
+1. User creates redirect via React UI → API call to `/api/redirects`
 2. `NetworkManager` calls `network_helper.sh` via sudo
 3. Helper script adds secondary IP + NAT rules with iptables
 4. Print traffic to broken IP is forwarded to target printer
@@ -75,7 +85,7 @@ Uses mDNS (zeroconf) and SNMP scanning. See [app/discovery.py](app/discovery.py)
 
 ### Authentication
 
-Flask-Login with bcrypt password hashing. Account lockout after failed attempts. See [app/auth.py](app/auth.py).
+JWT tokens for API authentication via flask-jwt-extended. Bcrypt password hashing. Account lockout after failed attempts. See [app/auth.py](app/auth.py).
 
 ## File Locations (Production)
 

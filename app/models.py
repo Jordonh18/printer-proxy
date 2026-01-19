@@ -191,7 +191,8 @@ class User:
     
     def __init__(self, id: int, username: str, password_hash: str, role: str = 'admin',
                  is_active: bool = True, last_login: Optional[datetime] = None,
-                 failed_attempts: int = 0, locked_until: Optional[datetime] = None):
+                 failed_attempts: int = 0, locked_until: Optional[datetime] = None,
+                 created_at: Optional[datetime] = None):
         self.id = id
         self.username = username
         self.password_hash = password_hash
@@ -200,6 +201,7 @@ class User:
         self.last_login = last_login
         self.failed_attempts = failed_attempts
         self.locked_until = locked_until
+        self.created_at = created_at
     
     @property
     def is_authenticated(self):
@@ -242,7 +244,8 @@ class User:
                 is_active=bool(row['is_active']),
                 last_login=row['last_login'],
                 failed_attempts=row['failed_attempts'],
-                locked_until=row['locked_until']
+                locked_until=row['locked_until'],
+                created_at=row['created_at'] if 'created_at' in row.keys() else None
             )
         return None
     
@@ -264,7 +267,8 @@ class User:
                 is_active=bool(row['is_active']),
                 last_login=row['last_login'],
                 failed_attempts=row['failed_attempts'],
-                locked_until=row['locked_until']
+                locked_until=row['locked_until'],
+                created_at=row['created_at'] if 'created_at' in row.keys() else None
             )
         return None
     
@@ -300,7 +304,8 @@ class User:
             is_active=bool(row['is_active']),
             last_login=row['last_login'],
             failed_attempts=row['failed_attempts'],
-            locked_until=row['locked_until']
+            locked_until=row['locked_until'],
+            created_at=row['created_at'] if 'created_at' in row.keys() else None
         ) for row in rows]
 
     def update_role(self, role: str):

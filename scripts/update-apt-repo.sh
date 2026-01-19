@@ -149,6 +149,6 @@ echo "  1. Commit and push the apt-repo directory"
 echo "  2. Enable GitHub Pages for the apt-repo directory"
 echo "  3. Users can install with:"
 echo ""
-echo '     echo "deb [trusted=yes] https://jordonh18.github.io/printer-proxy stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list'
+echo '     echo "deb [trusted=yes] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list'
 echo "     sudo apt update && sudo apt install printer-proxy"
 echo ""

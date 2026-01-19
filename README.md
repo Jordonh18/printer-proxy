@@ -14,10 +14,10 @@ Install Printer Proxy via the official APT repository:
 
 ```bash
 # 1. Add the GPG signing key
-curl -fsSL https://jordonh18.github.io/printer-proxy/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/printer-proxy.gpg
+curl -fsSL https://apt.jordonh.me/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/printer-proxy.gpg
 
 # 2. Add the repository
-echo "deb [signed-by=/usr/share/keyrings/printer-proxy.gpg] https://jordonh18.github.io/printer-proxy stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list
+echo "deb [signed-by=/usr/share/keyrings/printer-proxy.gpg] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list
 
 # 3. Install
 sudo apt update

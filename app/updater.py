@@ -25,7 +25,7 @@ from app.version import __version__
 logger = logging.getLogger(__name__)
 
 # APT Configuration
-APT_REPO_URL = "https://jordonh18.github.io/printer-proxy"
+APT_REPO_URL = "https://apt.jordonh.me"
 PACKAGE_NAME = "printer-proxy"
 
 # Paths
