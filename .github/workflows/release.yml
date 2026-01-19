@@ -173,12 +173,6 @@ jobs:
             echo "## What's Changed"
             echo ""
             echo "$COMMITS"
-            echo ""
-            echo "---"
-            echo ""
-            echo "## Installation"
-            echo ""
-            echo "See the [APT Repository](https://jordonh18.github.io/printer-proxy) for installation instructions."
           } > release_notes.md
       
       - name: Create GitHub Release
