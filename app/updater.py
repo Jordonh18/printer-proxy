@@ -213,6 +213,34 @@ class UpdateManager:
             logger.error(f"Failed to get APT version: {e}")
             return None
 
+    def _get_upgrade_candidate_version(self) -> Optional[str]:
+        """Use a dry-run upgrade to detect the candidate version."""
+        try:
+            result = subprocess.run(
+                ['apt-get', '-s', 'install', '--only-upgrade', PACKAGE_NAME],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+            if result.returncode != 0:
+                return None
+
+            # Example: Inst printer-proxy [1.0.0-beta.2] (1.0.1 stable [all])
+            match = re.search(rf"Inst\s+{re.escape(PACKAGE_NAME)}\s+\[[^\]]+\]\s+\(([^)\s]+)", result.stdout)
+            if match:
+                return match.group(1)
+
+            # Example: Inst printer-proxy (1.0.1 stable [all])
+            match = re.search(rf"Inst\s+{re.escape(PACKAGE_NAME)}\s+\(([^)\s]+)", result.stdout)
+            if match:
+                return match.group(1)
+
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get upgrade candidate: {e}")
+            return None
+
     def _get_repo_available_version(self) -> Optional[str]:
         """Query the APT repository Packages file for available version."""
         try:
@@ -267,6 +295,9 @@ class UpdateManager:
             # Check available version
             available = self._get_apt_available_version()
             repo_available = None
+            upgrade_available = self._get_upgrade_candidate_version()
+            if upgrade_available and self._is_newer_version(upgrade_available, available or __version__):
+                available = upgrade_available
             if not available:
                 repo_available = self._get_repo_available_version()
             elif not self._is_newer_version(available, __version__):
