@@ -241,6 +241,17 @@ jobs:
           # Copy static files from docs
           cp docs/index.html site/ 2>/dev/null || true
           cp docs/README.md site/ 2>/dev/null || true
+
+          # Update landing page version display
+          if [ -f site/index.html ]; then
+            if [[ "$VERSION" == *"-"* ]]; then
+              LABEL="${VERSION#*-}"
+              DISPLAY="<strong>Current Version:</strong> ${VERSION} (${LABEL})"
+            else
+              DISPLAY="<strong>Current Version:</strong> ${VERSION}"
+            fi
+            sed -i "s#<strong>Current Version:</strong>.*#${DISPLAY}#" site/index.html
+          fi
           
           # Copy the package
           cp "$DEB_FILE" site/pool/main/

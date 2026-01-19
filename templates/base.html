@@ -630,8 +630,11 @@
     {% endwith %}
     
     <footer class="footer-modern">
-        <div class="container">
-            {{ version_string }}
+        <div class="container d-flex justify-content-between align-items-center">
+            <span>{{ version_string }}</span>
+            <a href="https://github.com/Jordonh18/printer-proxy" target="_blank" rel="noopener" style="color: inherit; text-decoration: none;">
+                <i class="bi bi-github me-1"></i>GitHub
+            </a>
         </div>
     </footer>
     

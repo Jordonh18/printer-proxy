@@ -14,6 +14,7 @@ import threading
 import fcntl
 import subprocess
 import re
+import urllib.request
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
@@ -211,6 +212,25 @@ class UpdateManager:
         except Exception as e:
             logger.error(f"Failed to get APT version: {e}")
             return None
+
+    def _get_repo_available_version(self) -> Optional[str]:
+        """Query the APT repository Packages file for available version."""
+        try:
+            packages_url = f"{APT_REPO_URL}/dists/stable/main/binary-all/Packages"
+            with urllib.request.urlopen(packages_url, timeout=15) as resp:
+                content = resp.read().decode('utf-8', errors='ignore')
+
+            current_pkg = False
+            for line in content.splitlines():
+                if line.startswith('Package:'):
+                    current_pkg = line.split(':', 1)[1].strip() == PACKAGE_NAME
+                elif current_pkg and line.startswith('Version:'):
+                    return line.split(':', 1)[1].strip()
+
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to read repo Packages file: {e}")
+            return None
     
     def check_for_updates(self, force: bool = False) -> Tuple[bool, Optional[str]]:
         """Check APT repository for available updates."""
@@ -246,6 +266,13 @@ class UpdateManager:
             
             # Check available version
             available = self._get_apt_available_version()
+            repo_available = None
+            if not available:
+                repo_available = self._get_repo_available_version()
+            elif not self._is_newer_version(available, __version__):
+                repo_available = self._get_repo_available_version()
+                if repo_available and self._is_newer_version(repo_available, available):
+                    available = repo_available
             
             with self._state_lock:
                 self._state.last_check = datetime.now().isoformat()
@@ -256,6 +283,8 @@ class UpdateManager:
                     logger.info(f"Update available: {__version__} -> {available}")
                 elif available:
                     self._state.available_version = available
+                elif repo_available:
+                    self._state.available_version = repo_available
                 
                 self._save_state()
                 return self._is_newer_version(self._state.available_version, __version__), None
