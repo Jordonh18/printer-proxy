@@ -195,10 +195,18 @@ jobs:
     needs: [check-changes, release]
     
     steps:
-      - name: Checkout code
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+      
+      - name: Checkout main for static files
         uses: actions/checkout@v4
         with:
           ref: main
+          path: main-repo
+          sparse-checkout: docs
       
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -210,17 +218,22 @@ jobs:
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
       
+      - name: Copy static files
+        run: |
+          cp main-repo/docs/index.html gh-pages/ 2>/dev/null || true
+          cp main-repo/docs/README.md gh-pages/ 2>/dev/null || true
+      
       - name: Update APT repository
         run: |
           VERSION="${{ needs.check-changes.outputs.new_version }}"
           DEB_FILE="builds/printer-proxy_${VERSION}_all.deb"
           
-          mkdir -p apt-repo/pool/main
-          mkdir -p apt-repo/dists/stable/main/binary-all
+          mkdir -p gh-pages/pool/main
+          mkdir -p gh-pages/dists/stable/main/binary-all
           
-          cp "$DEB_FILE" apt-repo/pool/main/
+          cp "$DEB_FILE" gh-pages/pool/main/
           
-          cd apt-repo
+          cd gh-pages
           dpkg-scanpackages --arch all pool/ > dists/stable/main/binary-all/Packages
           gzip -9c dists/stable/main/binary-all/Packages > dists/stable/main/binary-all/Packages.gz
           
@@ -258,19 +271,20 @@ jobs:
       
       - name: Sign Release file
         run: |
-          cd apt-repo/dists/stable
+          cd gh-pages/dists/stable
           gpg --batch --armor --detach-sign --output Release.gpg Release
           gpg --batch --armor --clearsign --output InRelease Release
       
       - name: Export public key
         run: |
-          gpg --armor --export > apt-repo/gpg-key.asc
+          gpg --armor --export > gh-pages/gpg-key.asc
       
-      - name: Commit and push APT repository
+      - name: Push to gh-pages branch
         run: |
+          cd gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          git add apt-repo/
+          git add -A
           git commit -m "Update APT repository with v${{ needs.check-changes.outputs.new_version }}" || echo "No changes to commit"
           git push
