@@ -3,7 +3,7 @@ Flask routes and views
 """
 from flask import (
     Blueprint, render_template, redirect, url_for, flash,
-    request, jsonify
+    request, jsonify, current_app
 )
 from flask_login import login_user, logout_user, login_required, current_user
 
@@ -12,7 +12,14 @@ from app.auth import authenticate_user, create_initial_admin, validate_password_
 from app.printers import get_registry, Printer
 from app.network import get_network_manager
 from app.discovery import get_discovery
-from config.config import DEFAULT_PORT
+from config.config import (
+    DEFAULT_PORT,
+    MIN_PASSWORD_LENGTH,
+    PASSWORD_REQUIRE_UPPERCASE,
+    PASSWORD_REQUIRE_LOWERCASE,
+    PASSWORD_REQUIRE_DIGIT,
+    PASSWORD_REQUIRE_SPECIAL
+)
 
 
 # Blueprints
@@ -382,6 +389,21 @@ def add_printer():
         )
         
         if registry.add_printer(printer):
+            # Start background services if they were deferred
+            try:
+                from app.health_check import get_scheduler, start_health_checks
+                scheduler = get_scheduler()
+                if not scheduler.is_running():
+                    start_health_checks()
+
+                from app.job_monitor import get_job_monitor
+                monitor = get_job_monitor()
+                if not monitor.is_running():
+                    monitor.init_app(current_app._get_current_object())
+                    monitor.start()
+            except Exception as e:
+                current_app.logger.error(f"Failed to start background services after add: {e}")
+
             AuditLog.log(
                 username=current_user.username,
                 action="PRINTER_ADDED",
@@ -514,6 +536,19 @@ def delete_printer(printer_id):
     printer_ip = printer.ip
     
     if registry.delete_printer(printer_id):
+        # Stop background services if no printers remain
+        if not registry.has_printers():
+            try:
+                from app.health_check import stop_health_checks
+                stop_health_checks()
+
+                from app.job_monitor import get_job_monitor
+                monitor = get_job_monitor()
+                if monitor.is_running():
+                    monitor.stop()
+            except Exception as e:
+                current_app.logger.error(f"Failed to stop background services after delete: {e}")
+
         AuditLog.log(
             username=current_user.username,
             action="PRINTER_DELETED",
@@ -1050,6 +1085,7 @@ def user_management():
 @role_required('admin')
 def user_add():
     """Create a new user."""
+    password_requirements = _get_password_requirements()
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
@@ -1059,26 +1095,32 @@ def user_add():
 
         if not username:
             flash('Username is required', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form)
+            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
 
         if User.get_by_username(username):
             flash('Username already exists', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form)
+            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
 
         if role not in ['admin', 'operator', 'viewer']:
             flash('Invalid role selected', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form)
+            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
 
         if password != confirm_password:
             flash('Passwords do not match', 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form)
+            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
 
         is_valid, error = validate_password_strength(password)
         if not is_valid:
             flash(error, 'error')
-            return render_template('user_form.html', mode='add', form_data=request.form)
+            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
 
-        User.create(username, hash_password(password), role=role, is_active=is_active)
+        try:
+            User.create(username, hash_password(password), role=role, is_active=is_active)
+        except Exception as e:
+            current_app.logger.error(f"Failed to create user '{username}': {e}")
+            flash('Failed to create user. Check logs for details.', 'error')
+            return render_template('user_form.html', mode='add', form_data=request.form.to_dict(), password_requirements=password_requirements)
+
         AuditLog.log(
             username=current_user.username,
             action='USER_CREATED',
@@ -1088,7 +1130,7 @@ def user_add():
         flash(f"User '{username}' created", 'success')
         return redirect(url_for('main.user_management'))
 
-    return render_template('user_form.html', mode='add', form_data={})
+    return render_template('user_form.html', mode='add', form_data={}, password_requirements=password_requirements)
 
 
 @main_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
@@ -1101,6 +1143,8 @@ def user_edit(user_id: int):
         flash('User not found', 'error')
         return redirect(url_for('main.user_management'))
 
+    password_requirements = _get_password_requirements()
+
     if request.method == 'POST':
         role = request.form.get('role', '').strip()
         is_active = request.form.get('is_active') == 'on'
@@ -1109,27 +1153,27 @@ def user_edit(user_id: int):
 
         if role not in ['admin', 'operator', 'viewer']:
             flash('Invalid role selected', 'error')
-            return render_template('user_form.html', mode='edit', user=user)
+            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
 
         admins = [u for u in User.get_all() if u.role == 'admin']
         if user.role == 'admin' and role != 'admin' and len(admins) <= 1:
             flash('At least one admin is required', 'error')
-            return render_template('user_form.html', mode='edit', user=user)
+            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
         if user.id == current_user.id and role != 'admin':
             flash('You cannot remove your own admin access', 'error')
-            return render_template('user_form.html', mode='edit', user=user)
+            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
         if user.id == current_user.id and not is_active:
             flash('You cannot disable your own account', 'error')
-            return render_template('user_form.html', mode='edit', user=user)
+            return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
 
         if new_password or confirm_password:
             if new_password != confirm_password:
                 flash('Passwords do not match', 'error')
-                return render_template('user_form.html', mode='edit', user=user)
+                return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
             is_valid, error = validate_password_strength(new_password)
             if not is_valid:
                 flash(error, 'error')
-                return render_template('user_form.html', mode='edit', user=user)
+                return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
             user.update_password(hash_password(new_password))
             AuditLog.log(
                 username=current_user.username,
@@ -1149,7 +1193,54 @@ def user_edit(user_id: int):
         flash(f"User '{user.username}' updated", 'success')
         return redirect(url_for('main.user_management'))
 
-    return render_template('user_form.html', mode='edit', user=user)
+    return render_template('user_form.html', mode='edit', user=user, password_requirements=password_requirements)
+
+
+@main_bp.route('/users/<int:user_id>/delete', methods=['POST'])
+@login_required
+@role_required('admin')
+def user_delete(user_id: int):
+    """Delete a user."""
+    user = User.get_by_id(user_id)
+    if not user:
+        flash('User not found', 'error')
+        return redirect(url_for('main.user_management'))
+
+    if user.id == current_user.id:
+        flash('You cannot delete your own account', 'error')
+        return redirect(url_for('main.user_management'))
+
+    admins = [u for u in User.get_all() if u.role == 'admin']
+    if user.role == 'admin' and len(admins) <= 1:
+        flash('At least one admin is required', 'error')
+        return redirect(url_for('main.user_management'))
+
+    if User.delete_by_id(user.id):
+        AuditLog.log(
+            username=current_user.username,
+            action='USER_DELETED',
+            details=f"Deleted user '{user.username}'",
+            success=True
+        )
+        flash(f"User '{user.username}' deleted", 'success')
+    else:
+        flash('Failed to delete user', 'error')
+
+    return redirect(url_for('main.user_management'))
+
+
+def _get_password_requirements():
+    """Build a list of password requirement strings for UI hints."""
+    requirements = [f"At least {MIN_PASSWORD_LENGTH} characters"]
+    if PASSWORD_REQUIRE_UPPERCASE:
+        requirements.append("At least one uppercase letter")
+    if PASSWORD_REQUIRE_LOWERCASE:
+        requirements.append("At least one lowercase letter")
+    if PASSWORD_REQUIRE_DIGIT:
+        requirements.append("At least one digit")
+    if PASSWORD_REQUIRE_SPECIAL:
+        requirements.append("At least one special character")
+    return requirements
 
 
 # ============================================================================

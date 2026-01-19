@@ -78,6 +78,10 @@ class JobMonitor:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         logger.info(f"Job monitor started (polling every {self.poll_interval}s)")
+
+    def is_running(self) -> bool:
+        """Check if the background monitoring thread is running."""
+        return bool(self._running and self._thread and self._thread.is_alive())
         
     def stop(self):
         """Stop the background monitoring thread."""
@@ -118,7 +122,7 @@ class JobMonitor:
                     logger.debug("Job monitor: no printers registered, skipping poll")
                     return
 
-                logger.info(f"Job monitor polling {len(printers)} printers")
+                logger.debug(f"Job monitor polling {len(printers)} printers")
 
                 current_ips = {printer.ip for printer in printers}
                 # Clean up stale states for removed printers to avoid memory growth

@@ -337,6 +337,20 @@ class User:
         )
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def delete_by_id(user_id: int) -> bool:
+        """Delete a user by ID."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return deleted > 0
+        except Exception:
+            return False
     
     def increment_failed_attempts(self):
         """Increment failed login attempts."""

@@ -112,6 +112,13 @@
                         <label for="password" class="form-label-modern">{{ 'Password' if mode == 'add' else 'New Password' }}</label>
                         <input type="password" class="form-input" id="password" name="password" {% if mode == 'add' %}required{% endif %}>
                         <div class="form-hint">{{ 'Required for new users.' if mode == 'add' else 'Leave blank to keep the current password.' }}</div>
+                        {% if password_requirements %}
+                        <ul class="form-hint" style="margin: 0.5rem 0 0 1rem;">
+                            {% for req in password_requirements %}
+                            <li>{{ req }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
                     </div>
 
                     <div class="form-section mb-4">

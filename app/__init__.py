@@ -63,11 +63,17 @@ def create_app() -> Flask:
     
     # Start background health checks (only in production, not in reloader)
     if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        start_health_checks()
-        
-        # Start the job monitor for print job detection
-        from app.job_monitor import init_job_monitor
-        init_job_monitor(app, start=True)
+        # Only start printer polling services if printers exist
+        from app.printers import get_registry
+        registry = get_registry()
+        if registry.has_printers():
+            start_health_checks()
+            
+            # Start the job monitor for print job detection
+            from app.job_monitor import init_job_monitor
+            init_job_monitor(app, start=True)
+        else:
+            app.logger.info("No printers registered; deferring polling services")
         
         # Start the auto-update checker
         from app.updater import init_updater

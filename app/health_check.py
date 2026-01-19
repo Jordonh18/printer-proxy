@@ -220,6 +220,10 @@ class HealthCheckScheduler:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         logger.info(f"Health check scheduler started (interval: {self.interval}s)")
+
+    def is_running(self) -> bool:
+        """Check if the background health check thread is running."""
+        return bool(self._running and self._thread and self._thread.is_alive())
     
     def stop(self):
         """Stop the background health check thread."""
