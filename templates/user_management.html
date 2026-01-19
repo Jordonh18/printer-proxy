@@ -129,6 +129,11 @@
         border-color: var(--muted);
         text-decoration: none;
     }
+    .action-btn-danger:hover {
+        background: var(--danger-bg);
+        color: var(--danger-text);
+        border-color: var(--danger-bg);
+    }
 </style>
 {% endblock %}
 
@@ -183,7 +188,7 @@
                         {% if user.id != current_user.id %}
                         <form method="POST" action="{{ url_for('main.user_delete', user_id=user.id) }}" style="display:inline;" onsubmit="return confirm('Delete user {{ user.username }}?');">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="action-btn" title="Delete User">
+                            <button type="submit" class="action-btn action-btn-danger" title="Delete User">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </form>
