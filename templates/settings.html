@@ -714,6 +714,16 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateActionButton() {
         const btn = document.getElementById('updateActionBtn');
         if (!btn || !currentUpdateState) return;
+
+        btn.disabled = false;
+
+        if (currentUpdateState.update_in_progress) {
+            btn.className = 'btn btn-secondary';
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Update in progress...';
+            btn.disabled = true;
+            btn.onclick = null;
+            return;
+        }
         
         if (currentUpdateState.update_available) {
             // Show install button
@@ -722,7 +732,7 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.onclick = installUpdate;
         } else {
             // Show check button
-            btn.className = 'btn btn-outline-primary';
+            btn.className = 'btn btn-primary';
             btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Check for Updates Now';
             btn.onclick = checkForUpdates;
         }
@@ -755,7 +765,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 
                 // Update UI
-                loadUpdateStatus();
+                await loadUpdateStatus();
             } else {
                 showToast(result.error || 'Failed to check for updates', 'danger');
                 btn.disabled = false;

@@ -51,6 +51,7 @@ case "$1" in
 Defaults:printer-proxy !requiretty
 printer-proxy ALL=(root) NOPASSWD: /opt/printer-proxy/scripts/network_helper.sh
 printer-proxy ALL=(root) NOPASSWD: /usr/bin/systemctl start printer-proxy-update.service
+printer-proxy ALL=(root) NOPASSWD: /opt/printer-proxy/scripts/update_helper.sh
 EOF
 
         # Install the update service

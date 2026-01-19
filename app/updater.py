@@ -281,16 +281,17 @@ class UpdateManager:
         logger.info("Checking for updates via APT...")
         
         try:
-            # Run apt update (requires sudo)
-            result = subprocess.run(
-                ['sudo', 'apt-get', 'update', '-qq'],
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            
-            if result.returncode != 0:
-                logger.warning(f"apt update failed: {result.stderr}")
+            # Refresh APT cache using helper (non-interactive)
+            helper_path = Path("/opt/printer-proxy/scripts/update_helper.sh")
+            if helper_path.exists():
+                result = subprocess.run(
+                    ['sudo', '-n', str(helper_path), 'check'],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                if result.returncode != 0:
+                    logger.warning(f"APT cache refresh failed: {result.stderr.strip()}")
             
             # Check available version
             available = self._get_apt_available_version()
@@ -350,6 +351,24 @@ class UpdateManager:
         
         logger.info(f"Starting update to version {version}")
         
+        # Write update request file for update service
+        try:
+            request_file = self._data_dir / "update_request.json"
+            request_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(request_file, 'w') as f:
+                json.dump({
+                    "version": version,
+                    "requested_at": datetime.now().isoformat()
+                }, f)
+        except Exception as e:
+            error_msg = f"Failed to write update request: {e}"
+            logger.error(error_msg)
+            with self._state_lock:
+                self._state.update_in_progress = False
+                self._state.update_error = error_msg
+                self._save_state()
+            return False, error_msg
+
         # Trigger the update service
         try:
             result = subprocess.run(

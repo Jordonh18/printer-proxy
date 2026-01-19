@@ -5,7 +5,7 @@ Update this file to change the version everywhere.
 The build script and templates read from here.
 """
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 __version_info__ = (1, 0, 0)
 
 # For display
