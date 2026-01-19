@@ -41,79 +41,13 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
 
-      - name: Detect release-worthy changes
-        id: changes
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$LAST_TAG" ]; then
-            BASE_REF=$(git rev-list --max-parents=0 HEAD)
-          else
-            BASE_REF="$LAST_TAG"
-          fi
-
-          echo "Base ref: $BASE_REF"
-          CHANGED_FILES=$(git diff --name-only "$BASE_REF"..HEAD)
-
-          # Ignore docs/markdown-only changes for release gating
-          IGNORE_REGEX='^(README\.md|LICENSE|\.gitignore|docs/|\.github/|.*\.md$)'
-          RELEASE_FILES=$(echo "$CHANGED_FILES" | grep -vE "$IGNORE_REGEX" || true)
-
-          if [ -z "$RELEASE_FILES" ]; then
-            echo "release_worthy=false" >> $GITHUB_OUTPUT
-            echo "No release-worthy files changed."
-          else
-            echo "release_worthy=true" >> $GITHUB_OUTPUT
-            echo "Release-worthy files changed:"
-            echo "$RELEASE_FILES"
-          fi
-
       - name: Decide release version
         id: check
         run: |
           CURRENT_VERSION="${{ steps.current.outputs.version }}"
-          RELEASE_WORTHY="${{ steps.changes.outputs.release_worthy }}"
 
-          if [ "$RELEASE_WORTHY" != "true" ]; then
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-            echo "No release-worthy changes. Skipping release."
-            exit 0
-          fi
-
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${CURRENT_VERSION}")
-
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-            echo "Will create release v$CURRENT_VERSION"
-            exit 0
-          fi
-
-          # Release exists, auto-bump patch or pre-release version
-          NEW_VERSION=$(python3 - <<'PY'
-import re
-version = "${CURRENT_VERSION}"
-base, sep, pre = version.partition('-')
-parts = base.split('.')
-while len(parts) < 3:
-    parts.append('0')
-major, minor, patch = [int(p) for p in parts[:3]]
-if pre:
-    m = re.match(r'(alpha|beta|rc)\.(\d+)$', pre)
-    if m:
-        label, num = m.group(1), int(m.group(2)) + 1
-        new_version = f"{major}.{minor}.{patch}-{label}.{num}"
-    else:
-        patch += 1
-        new_version = f"{major}.{minor}.{patch}-{pre}"
-else:
-    patch += 1
-    new_version = f"{major}.{minor}.{patch}"
-print(new_version)
-PY
-          )
+          # Always bump patch version on each push
+          NEW_VERSION=$(python3 -c "import os; v=os.environ['CURRENT_VERSION'].split('-')[0]; parts=v.split('.'); parts+=['0']*(3-len(parts)); major, minor, patch=[int(p) for p in parts[:3]]; print(f'{major}.{minor}.{patch+1}')")
 
           echo "should_release=true" >> $GITHUB_OUTPUT
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
@@ -146,20 +80,20 @@ PY
           VERSION="${{ needs.check-changes.outputs.new_version }}"
           CURRENT=$(python3 -c "exec(open('app/version.py').read()); print(__version__)")
           if [ "$VERSION" != "$CURRENT" ]; then
-            cat > app/version.py << EOF
-"""
-Single source of truth for application version.
-
-Update this file to change the version everywhere.
-The build script and templates read from here.
-"""
-
-__version__ = "$VERSION"
-__version_info__ = tuple(int(x) for x in __version__.split("."))
-
-# For display
-VERSION_STRING = f"Printer Proxy v{__version__}"
-EOF
+            {
+              echo '"""'
+              echo 'Single source of truth for application version.'
+              echo ''
+              echo 'Update this file to change the version everywhere.'
+              echo 'The build script and templates read from here.'
+              echo '"""'
+              echo ''
+              echo "__version__ = \"$VERSION\""
+              echo '__version_info__ = tuple(int(x) for x in __version__.split("."))'
+              echo ''
+              echo '# For display'
+              echo 'VERSION_STRING = f"Printer Proxy v{__version__}"'
+            } > app/version.py
             echo "Updated app/version.py to $VERSION"
           fi
       
