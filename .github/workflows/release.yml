@@ -144,7 +144,7 @@ jobs:
   test:
     name: Test Installation
     runs-on: ubuntu-latest
-    needs: [check-changes]
+    needs: [check-changes, build]
     
     steps:
       - name: Checkout code
