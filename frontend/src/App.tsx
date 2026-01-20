@@ -4,13 +4,18 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { LoginPage } from '@/pages/LoginPage';
+import { SetupPage } from '@/pages/SetupPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { PrintersPage } from '@/pages/PrintersPage';
 import { PrinterDetailPage } from '@/pages/PrinterDetailPage';
 import { RedirectsPage } from '@/pages/RedirectsPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { AdminSettingsPage } from '@/pages/AdminSettingsPage';
 import { AuditLogPage } from '@/pages/AuditLogPage';
+import { NotificationsPage } from '@/pages/NotificationsPage';
+import { Toaster } from '@/components/ui/sonner';
+import { useNotificationStream } from '@/hooks/useNotifications';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -22,65 +27,77 @@ const queryClient = new QueryClient({
   },
 });
 
+// Component to initialize notification stream for authenticated users
+function NotificationStreamProvider({ children }: { children: React.ReactNode }) {
+  useNotificationStream();
+  return <>{children}</>;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<LoginPage />} />
+        <NotificationStreamProvider>
+          <BrowserRouter>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/setup" element={<SetupPage />} />
 
-            {/* Protected routes */}
-            <Route
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/printers" element={<PrintersPage />} />
-              <Route path="/printers/:id" element={<PrinterDetailPage />} />
+              {/* Protected routes */}
               <Route
-                path="/redirects"
                 element={
-                  <ProtectedRoute requiredRoles={['admin', 'operator']}>
-                    <RedirectsPage />
+                  <ProtectedRoute>
+                    <DashboardLayout />
                   </ProtectedRoute>
                 }
-              />
-              <Route
-                path="/users"
-                element={
-                  <ProtectedRoute requiredRoles={['admin']}>
-                    <UsersPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute requiredRoles={['admin']}>
-                    <SettingsPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/audit-logs"
-                element={
-                  <ProtectedRoute requiredRoles={['admin']}>
-                    <AuditLogPage />
-                  </ProtectedRoute>
-                }
-              />
-            </Route>
+              >
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/printers" element={<PrintersPage />} />
+                <Route path="/printers/:id" element={<PrinterDetailPage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
+                <Route
+                  path="/redirects"
+                  element={
+                    <ProtectedRoute requiredRoles={['admin', 'operator']}>
+                      <RedirectsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/users"
+                  element={
+                    <ProtectedRoute requiredRoles={['admin']}>
+                      <UsersPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route
+                  path="/admin/settings"
+                  element={
+                    <ProtectedRoute requiredRoles={['admin']}>
+                      <AdminSettingsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/audit-logs"
+                  element={
+                    <ProtectedRoute requiredRoles={['admin']}>
+                      <AuditLogPage />
+                    </ProtectedRoute>
+                  }
+                />
+              </Route>
 
-            {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </BrowserRouter>
+              {/* Default redirect */}
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </BrowserRouter>
+          <Toaster />
+        </NotificationStreamProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

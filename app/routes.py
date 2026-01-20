@@ -17,6 +17,7 @@ from app.printer_stats import get_printer_stats
 import time
 import secrets
 import json
+import queue
 import pyotp
 import bcrypt
 from app.network import get_network_manager
@@ -74,9 +75,50 @@ def _consume_recovery_code(user: User, code: str) -> bool:
 # ============================================================================
 
 def api_auth_required(fn):
-    """Decorator for API routes that require JWT authentication."""
+    """Decorator for API routes that require JWT or API token authentication."""
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        # Check for Bearer token first
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]  # Remove 'Bearer ' prefix
+            
+            # Check if it's an API token (shorter than JWT, no dots)
+            # API tokens are ~43 chars, JWTs are much longer and have dots
+            if '.' not in token:
+                from app.api_tokens import APIToken
+                import hashlib
+                
+                # Hash the token to lookup in database
+                token_hash = hashlib.sha256(token.encode()).hexdigest()
+                api_token = APIToken.get_by_hash(token_hash)
+                
+                if api_token:
+                    # Check if token is expired
+                    if api_token.is_expired():
+                        return jsonify({'error': 'Token expired'}), 401
+                    
+                    # Get the user
+                    user = User.get_by_id(api_token.user_id)
+                    if not user or not user.is_active:
+                        return jsonify({'error': 'Invalid token'}), 401
+                    
+                    # Update last used timestamp
+                    APIToken.update_last_used(api_token.id)
+                    
+                    # Set context variables
+                    g.api_user = user
+                    g.api_token = api_token
+                    g.api_claims = {
+                        'sub': user.id,
+                        'role': user.role,
+                        'permissions': api_token.permissions,
+                        'token_type': 'api_token'
+                    }
+                    
+                    return fn(*args, **kwargs)
+        
+        # Fall back to JWT authentication
         try:
             verify_jwt_in_request()
             user_id = get_jwt_identity()
@@ -92,6 +134,7 @@ def api_auth_required(fn):
                 UserSession.touch(jti)
                 g.api_user = user
                 g.api_claims = claims
+                g.api_claims['token_type'] = 'jwt'
                 g.api_session = session
                 return fn(*args, **kwargs)
         except JWTExtendedException as exc:
@@ -109,6 +152,15 @@ def api_auth_required(fn):
     return wrapper
 
 
+def check_api_permission(required_permission: str):
+    """Check if current API token has required permission."""
+    if g.api_claims.get('token_type') == 'api_token':
+        token_permissions = set(g.api_claims.get('permissions', []))
+        if required_permission not in token_permissions:
+            return jsonify({'error': f'Token missing required permission: {required_permission}'}), 403
+    return None  # Permission OK
+
+
 def api_role_required(*roles):
     """Decorator to require specific roles for API routes."""
     def decorator(fn):
@@ -116,6 +168,36 @@ def api_role_required(*roles):
         @api_auth_required
         def wrapper(*args, **kwargs):
             user_role = g.api_claims.get('role', '')
+            
+            # For API tokens, check if they have the necessary permissions
+            if g.api_claims.get('token_type') == 'api_token':
+                # Map roles to required permissions for this endpoint
+                # We'll need to check the actual permission based on the route
+                token_permissions = set(g.api_claims.get('permissions', []))
+                
+                # Determine required permission from the request path and method
+                required_perm = None
+                path = request.path
+                method = request.method
+                
+                # Map endpoints to permissions
+                if '/api/printers' in path:
+                    required_perm = 'printers:write' if method in ['POST', 'PUT', 'DELETE'] else 'printers:read'
+                elif '/api/redirects' in path:
+                    required_perm = 'redirects:write' if method in ['POST', 'PUT', 'DELETE'] else 'redirects:read'
+                elif '/api/users' in path:
+                    required_perm = 'users:write' if method in ['POST', 'PUT', 'DELETE'] else 'users:read'
+                elif '/api/settings' in path or '/api/admin' in path:
+                    required_perm = 'settings:write' if method in ['POST', 'PUT', 'DELETE'] else 'settings:read'
+                elif '/api/audit-logs' in path:
+                    required_perm = 'audit:read'
+                elif '/api/stats' in path or '/api/dashboard' in path:
+                    required_perm = 'stats:read'
+                
+                # Check if token has the required permission
+                if required_perm and required_perm not in token_permissions:
+                    return jsonify({'error': f'Token missing required permission: {required_perm}'}), 403
+            
             if user_role not in roles:
                 return jsonify({'error': 'Insufficient permissions'}), 403
             return fn(*args, **kwargs)
@@ -136,6 +218,8 @@ def api_auth_login():
     
     username = data.get('username', '').strip()
     password = data.get('password', '')
+    email = data.get('email')
+    full_name = data.get('full_name')
     totp_code = data.get('totp')
     recovery_code = data.get('recovery_code')
     
@@ -177,12 +261,21 @@ def api_auth_login():
     if jti:
         UserSession.create(user.id, jti, ip_address, user_agent)
     
+    # Send security event notification if enabled for this user
+    from app.notifications import notify_user_login
+    try:
+        notify_user_login(user.username, ip_address or 'Unknown', user_agent or 'Unknown', user.id)
+    except Exception as e:
+        # Don't fail login if notification fails
+        logger.error(f"Failed to send login notification: {e}")
+    
     return jsonify({
         'access_token': access_token,
         'refresh_token': refresh_token,
         'user': {
             'id': user.id,
             'username': user.username,
+            'full_name': getattr(user, 'full_name', None),
             'email': getattr(user, 'email', None),
             'role': user.role,
             'mfa_enabled': bool(user.mfa_enabled),
@@ -228,6 +321,7 @@ def api_auth_me():
     return jsonify({
         'id': user.id,
         'username': user.username,
+        'full_name': getattr(user, 'full_name', None),
         'email': getattr(user, 'email', None),
         'role': user.role,
         'is_active': user.is_active,
@@ -251,6 +345,7 @@ def api_auth_me_update():
     user = g.api_user
     new_username = data.get('username', '').strip()
     new_email = data.get('email', None)
+    full_name = data.get('full_name', None)
     theme = data.get('theme', user.theme)
     language = data.get('language', user.language)
     timezone = data.get('timezone', user.timezone)
@@ -265,6 +360,10 @@ def api_auth_me_update():
         new_email = new_email.strip()
     if new_email == '':
         new_email = None
+    if isinstance(full_name, str):
+        full_name = full_name.strip()
+    if full_name == '':
+        full_name = None
 
     if not new_username:
         return jsonify({'error': 'Username is required'}), 400
@@ -278,7 +377,7 @@ def api_auth_me_update():
         if existing_email and existing_email.id != user.id:
             return jsonify({'error': 'Email already in use'}), 400
 
-    user.update_profile(new_username, new_email)
+    user.update_profile(new_username, new_email, full_name)
     user.update_preferences(theme, language, timezone)
 
     AuditLog.log(
@@ -291,6 +390,7 @@ def api_auth_me_update():
     return jsonify({
         'id': user.id,
         'username': user.username,
+        'full_name': getattr(user, 'full_name', None),
         'email': getattr(user, 'email', None),
         'role': user.role,
         'is_active': user.is_active,
@@ -300,6 +400,76 @@ def api_auth_me_update():
         'language': user.language,
         'timezone': user.timezone
     })
+
+
+@api_bp.route('/auth/me/notifications', methods=['GET'])
+@api_auth_required
+def api_auth_me_notifications_get():
+    """Get current user's notification preferences."""
+    user = g.api_user
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT notification_preferences FROM users WHERE id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row and row['notification_preferences']:
+        try:
+            prefs = json.loads(row['notification_preferences'])
+        except (json.JSONDecodeError, TypeError):
+            prefs = {
+                'health_alerts': True,
+                'offline_alerts': True,
+                'job_failures': True,
+                'security_events': True,
+                'weekly_reports': False
+            }
+    else:
+        prefs = {
+            'health_alerts': True,
+            'offline_alerts': True,
+            'job_failures': True,
+            'security_events': True,
+            'weekly_reports': False
+        }
+    
+    return jsonify(prefs)
+
+
+@api_bp.route('/auth/me/notifications', methods=['PUT'])
+@api_auth_required
+def api_auth_me_notifications_update():
+    """Update current user's notification preferences."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    
+    user = g.api_user
+    
+    # Validate preferences
+    valid_prefs = {'health_alerts', 'offline_alerts', 'job_failures', 'security_events', 'weekly_reports'}
+    prefs = {}
+    for key in valid_prefs:
+        prefs[key] = bool(data.get(key, True))
+    
+    # Save to database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET notification_preferences = ? WHERE id = ?",
+        (json.dumps(prefs), user.id)
+    )
+    conn.commit()
+    conn.close()
+    
+    AuditLog.log(
+        username=user.username,
+        action='NOTIFICATION_PREFERENCES_UPDATED',
+        details='Updated notification preferences',
+        success=True
+    )
+    
+    return jsonify({'message': 'Notification preferences updated', 'preferences': prefs})
 
 
 @api_bp.route('/auth/mfa/setup', methods=['POST'])
@@ -430,6 +600,125 @@ def api_auth_logout():
     return jsonify({'message': 'Successfully logged out'})
 
 
+@api_bp.route('/auth/me/tokens', methods=['GET'])
+@api_auth_required
+def api_auth_me_tokens_list():
+    """List all API tokens for current user."""
+    from app.api_tokens import APIToken
+    
+    user = g.api_user
+    tokens = APIToken.get_by_user(user.id)
+    
+    return jsonify({
+        'tokens': [t.to_dict() for t in tokens]
+    })
+
+
+@api_bp.route('/auth/me/tokens', methods=['POST'])
+@api_auth_required
+def api_auth_me_tokens_create():
+    """Create a new API token for current user."""
+    from app.api_tokens import APIToken, validate_permissions, get_available_permissions
+    from datetime import datetime, timedelta
+    
+    user = g.api_user
+    data = request.get_json() or {}
+    
+    name = data.get('name', '').strip()
+    permissions = data.get('permissions', [])
+    expires_in_days = data.get('expires_in_days')
+    
+    if not name:
+        return jsonify({'error': 'Token name is required'}), 400
+    
+    if not permissions:
+        return jsonify({'error': 'At least one permission is required'}), 400
+    
+    # Validate permissions against user's role
+    if not validate_permissions(user.role, permissions):
+        available = get_available_permissions(user.role)
+        return jsonify({
+            'error': 'Invalid permissions for your role',
+            'available_permissions': available
+        }), 400
+    
+    # Calculate expiration date
+    expires_at = None
+    if expires_in_days:
+        try:
+            days = int(expires_in_days)
+            if days > 0:
+                expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+        except ValueError:
+            return jsonify({'error': 'Invalid expiration days'}), 400
+    
+    # Create token
+    try:
+        token, plain_token = APIToken.create(
+            user_id=user.id,
+            name=name,
+            permissions=permissions,
+            expires_at=expires_at
+        )
+        
+        AuditLog.log(
+            username=user.username,
+            action='API_TOKEN_CREATED',
+            details=f'Created API token: {name}'
+        )
+        
+        return jsonify({
+            'token': token.to_dict(include_token=True, token_value=plain_token),
+            'message': 'Token created successfully. Save this token - it will not be shown again!'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/auth/me/tokens/<int:token_id>', methods=['DELETE'])
+@api_auth_required
+def api_auth_me_tokens_delete(token_id: int):
+    """Delete an API token."""
+    from app.api_tokens import APIToken
+    
+    user = g.api_user
+    
+    if APIToken.delete(token_id, user.id):
+        AuditLog.log(
+            username=user.username,
+            action='API_TOKEN_DELETED',
+            details=f'Deleted API token ID: {token_id}'
+        )
+        return jsonify({'message': 'Token deleted'})
+    else:
+        return jsonify({'error': 'Token not found'}), 404
+
+
+@api_bp.route('/auth/me/tokens/permissions', methods=['GET'])
+@api_auth_required
+def api_auth_me_tokens_permissions():
+    """Get available permissions for current user's role."""
+    from app.api_tokens import get_available_permissions, PERMISSION_SCOPES
+    
+    user = g.api_user
+    available = get_available_permissions(user.role)
+    
+    # Group permissions by resource
+    grouped = {}
+    for perm in available:
+        resource, action = perm.split(':')
+        if resource not in grouped:
+            grouped[resource] = []
+        grouped[resource].append(action)
+    
+    return jsonify({
+        'role': user.role,
+        'permissions': available,
+        'grouped': grouped,
+        'all_scopes': PERMISSION_SCOPES
+    })
+
+
 @api_bp.route('/auth/setup', methods=['GET', 'POST'])
 def api_auth_setup():
     """Check if setup is needed or create initial admin."""
@@ -455,15 +744,26 @@ def api_auth_setup():
     
     username = data.get('username', '').strip()
     password = data.get('password', '')
+    email = data.get('email')
+    full_name = data.get('full_name')
     
     if not username:
         return jsonify({'error': 'Username is required'}), 400
+
+    if isinstance(email, str):
+        email = email.strip()
+    if email == '':
+        email = None
+    if isinstance(full_name, str):
+        full_name = full_name.strip()
+    if full_name == '':
+        full_name = None
     
     is_valid, error = validate_password_strength(password)
     if not is_valid:
         return jsonify({'error': error}), 400
     
-    success, message = create_initial_admin(username, password)
+    success, message = create_initial_admin(username, password, email=email, full_name=full_name)
     if success:
         return jsonify({'message': 'Admin user created successfully'})
     else:
@@ -493,6 +793,11 @@ def api_info():
 @api_auth_required
 def api_printers():
     """Get all printers with status."""
+    # Check API token permissions
+    perm_check = check_api_permission('printers:read')
+    if perm_check:
+        return perm_check
+    
     registry = get_registry()
     return jsonify(registry.get_all_statuses())
 
@@ -501,6 +806,11 @@ def api_printers():
 @api_auth_required
 def api_printer(printer_id):
     """Get a specific printer with status."""
+    # Check API token permissions
+    perm_check = check_api_permission('printers:read')
+    if perm_check:
+        return perm_check
+    
     registry = get_registry()
     printer = registry.get_by_id(printer_id)
     
@@ -976,6 +1286,7 @@ def api_users():
     return jsonify([{
         'id': u.id,
         'username': u.username,
+        'full_name': getattr(u, 'full_name', None),
         'email': getattr(u, 'email', None),
         'role': u.role,
         'is_active': u.is_active,
@@ -994,8 +1305,19 @@ def api_user_create():
     
     username = data.get('username', '').strip()
     password = data.get('password', '')
+    email = data.get('email', None)
+    full_name = data.get('full_name', None)
     role = data.get('role', 'viewer').strip()
     is_active = data.get('is_active', True)
+
+    if isinstance(email, str):
+        email = email.strip()
+    if email == '':
+        email = None
+    if isinstance(full_name, str):
+        full_name = full_name.strip()
+    if full_name == '':
+        full_name = None
     
     if not username:
         return jsonify({'error': 'Username is required'}), 400
@@ -1011,7 +1333,7 @@ def api_user_create():
         return jsonify({'error': error}), 400
     
     try:
-        user = User.create(username, hash_password(password), role=role, is_active=is_active)
+        user = User.create(username, hash_password(password), role=role, is_active=is_active, email=email, full_name=full_name)
         AuditLog.log(
             username=g.api_user.username,
             action='USER_CREATED',
@@ -1021,6 +1343,8 @@ def api_user_create():
         return jsonify({
             'id': user.id,
             'username': user.username,
+            'full_name': getattr(user, 'full_name', None),
+            'email': getattr(user, 'email', None),
             'role': user.role,
             'is_active': user.is_active
         }), 201
@@ -1039,6 +1363,7 @@ def api_user_get(user_id: int):
     return jsonify({
         'id': user.id,
         'username': user.username,
+        'full_name': getattr(user, 'full_name', None),
         'email': getattr(user, 'email', None),
         'role': user.role,
         'is_active': user.is_active,
@@ -1408,9 +1733,9 @@ def api_settings():
     return jsonify({'success': True, 'settings': settings})
 
 
-@api_bp.route('/settings/notifications/smtp', methods=['GET', 'POST'])
+@api_bp.route('/admin/smtp', methods=['GET', 'PUT'])
 @api_role_required('admin')
-def api_settings_smtp():
+def api_admin_smtp():
     """Get or update SMTP notification settings."""
     from app.settings import get_settings_manager
     manager = get_settings_manager()
@@ -1421,12 +1746,16 @@ def api_settings_smtp():
         smtp_settings['password'] = '********' if smtp_settings.get('password') else ''
         return jsonify({'success': True, 'settings': smtp_settings})
     
+    # PUT request
     data = request.get_json() or {}
     
     try:
         current_smtp = manager.get('notifications.smtp', {})
         
-        for field in ['enabled', 'host', 'port', 'username', 'from_address', 'to_addresses', 'use_tls', 'use_ssl']:
+        # Remove to_addresses if present (legacy field)
+        current_smtp.pop('to_addresses', None)
+        
+        for field in ['enabled', 'host', 'port', 'username', 'from_address', 'use_tls', 'use_ssl']:
             if field in data:
                 current_smtp[field] = data[field]
         
@@ -1438,7 +1767,7 @@ def api_settings_smtp():
         AuditLog.log(
             username=g.api_user.username,
             action='SETTINGS_UPDATED',
-            details='SMTP notification settings updated'
+            details='SMTP server configuration updated'
         )
         
         return jsonify({'success': True})
@@ -1446,12 +1775,20 @@ def api_settings_smtp():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@api_bp.route('/settings/notifications/smtp/test', methods=['POST'])
+@api_bp.route('/admin/smtp/test', methods=['POST'])
 @api_role_required('admin')
-def api_settings_smtp_test():
-    """Send a test email using current SMTP settings."""
+def api_admin_smtp_test():
+    """Send a test email to current user using SMTP settings."""
     from app.notifications import SMTPNotificationChannel
     from app.settings import get_settings_manager
+
+    # Get user's email
+    user_email = g.api_user.email
+    if not user_email:
+        return jsonify({
+            'success': False,
+            'error': 'Your account does not have an email address configured'
+        }), 400
 
     data = request.get_json() or {}
     if data:
@@ -1462,7 +1799,6 @@ def api_settings_smtp_test():
             'username': data.get('username', ''),
             'password': data.get('password', ''),
             'from_address': data.get('from_address', ''),
-            'to_addresses': data.get('to_addresses', ''),
             'use_tls': data.get('use_tls', True),
             'use_ssl': data.get('use_ssl', False),
         }
@@ -1477,10 +1813,12 @@ def api_settings_smtp_test():
             'error': 'SMTP is not properly configured'
         }), 400
 
+    # Send test email to current user only
     success = channel.send(
         subject="Printer Proxy - Test Notification",
         message="This is a test notification from Printer Proxy. If you received this, your notification settings are working correctly.",
         settings=settings,
+        recipient_emails=[user_email],
         html_message="""
         <html>
         <body style=\"font-family: Arial, sans-serif; padding: 20px;\">
@@ -1535,3 +1873,144 @@ def api_password_requirements():
         'require_special': PASSWORD_REQUIRE_SPECIAL
     })
 
+
+# ============================================================================
+# Notifications API
+# ============================================================================
+
+@api_bp.route('/notifications/stream')
+@api_auth_required
+def notifications_stream():
+    """Server-Sent Events endpoint for real-time notifications."""
+    from flask import Response, stream_with_context
+    from app.notification_manager import get_notification_manager
+    import time
+    
+    user_id = g.api_user.id
+    notification_manager = get_notification_manager()
+    
+    # Register SSE connection
+    message_queue = notification_manager.register_connection(user_id)
+    
+    def generate():
+        try:
+            # Send initial connection event
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            
+            # Send unread count on connect
+            unread_count = notification_manager.get_unread_count(user_id)
+            yield f"data: {json.dumps({'type': 'unread_count', 'count': unread_count})}\n\n"
+            
+            while True:
+                try:
+                    # Wait for notification with timeout
+                    notification = message_queue.get(timeout=30)
+                    
+                    # Send notification to client
+                    event_data = {
+                        'type': 'notification',
+                        'notification': notification.to_dict()
+                    }
+                    yield f"data: {json.dumps(event_data)}\n\n"
+                    
+                except queue.Empty:
+                    # Send heartbeat to keep connection alive
+                    yield f": heartbeat\n\n"
+                except Exception as e:
+                    logger.error(f"Error in SSE stream: {e}")
+                    break
+        finally:
+            # Cleanup connection
+            notification_manager.unregister_connection(user_id, message_queue)
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',  # Disable nginx buffering
+            'Connection': 'keep-alive'
+        }
+    )
+
+
+@api_bp.route('/notifications', methods=['GET'])
+@api_auth_required
+def get_notifications():
+    """Get notifications for the current user."""
+    from app.notification_manager import get_notification_manager
+    
+    user_id = g.api_user.id
+    limit = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
+    unread_only = request.args.get('unread_only', 'false').lower() == 'true'
+    
+    notification_manager = get_notification_manager()
+    notifications = notification_manager.get_user_notifications(
+        user_id, limit, offset, unread_only
+    )
+    
+    return jsonify({
+        'notifications': [n.to_dict() for n in notifications]
+    })
+
+
+@api_bp.route('/notifications/unread-count', methods=['GET'])
+@api_auth_required
+def get_unread_count():
+    """Get unread notification count for the current user."""
+    from app.notification_manager import get_notification_manager
+    
+    user_id = g.api_user.id
+    notification_manager = get_notification_manager()
+    count = notification_manager.get_unread_count(user_id)
+    
+    return jsonify({'count': count})
+
+
+@api_bp.route('/notifications/<int:notification_id>/read', methods=['POST'])
+@api_auth_required
+def mark_notification_read(notification_id):
+    """Mark a notification as read."""
+    from app.notification_manager import get_notification_manager
+    
+    user_id = g.api_user.id
+    notification_manager = get_notification_manager()
+    
+    success = notification_manager.mark_as_read(notification_id, user_id)
+    
+    if success:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Notification not found'}), 404
+
+
+@api_bp.route('/notifications/read-all', methods=['POST'])
+@api_auth_required
+def mark_all_notifications_read():
+    """Mark all notifications as read for the current user."""
+    from app.notification_manager import get_notification_manager
+    
+    user_id = g.api_user.id
+    notification_manager = get_notification_manager()
+    
+    notification_manager.mark_all_as_read(user_id)
+    
+    return jsonify({'success': True})
+
+
+@api_bp.route('/notifications/<int:notification_id>', methods=['DELETE'])
+@api_auth_required
+def delete_notification(notification_id):
+    """Delete a notification."""
+    from app.notification_manager import get_notification_manager
+    
+    user_id = g.api_user.id
+    notification_manager = get_notification_manager()
+    
+    success = notification_manager.delete_notification(notification_id, user_id)
+    
+    if success:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Notification not found'}), 404

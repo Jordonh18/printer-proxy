@@ -9,11 +9,20 @@
 - [x] Rollback capability on failed update
 - [x] Update notification banner in UI
 
-### Notification System
-- [ ] Email alerts (SMTP configuration)
+### ~~Notification System~~ ✅ DONE
+- [x] Email alerts (SMTP configuration)
+- [x] Notification preferences per user
+- [x] Security event notifications (login alerts)
+- [x] Health check notifications (offline/online alerts)
+- [x] Job failure notifications
+- [x] Weekly report generation (backend scheduler)
 - [ ] Webhook support (Slack, Teams, Discord)
+- [ ] Custom Reports page with scheduling
+  - Weekly report preferences UI
+  - Custom report templates
+  - Schedule configuration (daily, weekly, monthly)
+  - Manual report generation
 - [ ] Configurable alert triggers:
-  - Printer offline
   - Toner low (configurable threshold)
   - Redirect activated/deactivated
   - Failed health checks (consecutive failures)

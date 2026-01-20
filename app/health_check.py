@@ -264,11 +264,33 @@ class HealthCheckScheduler:
                     break
                 
                 try:
+                    # Get previous status before checking
+                    previous_status = self.checker.get_cached_status(printer.id)
+                    was_online = previous_status and previous_status.get('is_online', False)
+                    
                     result = self.checker.check_printer(printer.id, printer.ip)
                     self.checker.save_result(result)
                     
+                    # Detect status change and send notifications
                     if not result.is_online:
                         logger.warning(f"Printer {printer.id} ({printer.ip}) is OFFLINE")
+                        
+                        # Send offline notification if status changed from online to offline
+                        if was_online:
+                            from app.notifications import notify_printer_offline
+                            try:
+                                notify_printer_offline(printer.name, printer.ip)
+                            except Exception as e:
+                                logger.error(f"Failed to send offline notification: {e}")
+                    else:
+                        # Printer is online - send recovery notification if it was offline before
+                        if previous_status and not was_online:
+                            from app.notifications import notify_printer_online
+                            try:
+                                notify_printer_online(printer.name, printer.ip)
+                            except Exception as e:
+                                logger.error(f"Failed to send online notification: {e}")
+                    
                 except Exception as e:
                     logger.error(f"Error checking printer {printer.id}: {e}")
             

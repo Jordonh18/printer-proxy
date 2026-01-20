@@ -122,6 +122,16 @@ export const authApi = {
     return response.data;
   },
 
+  setupStatus: async (): Promise<{ setup_required: boolean }> => {
+    const response = await api.get('/auth/setup');
+    return response.data;
+  },
+
+  createInitialAdmin: async (data: { username: string; password: string; email?: string | null; full_name?: string | null }): Promise<{ message: string }> => {
+    const response = await api.post('/auth/setup', data);
+    return response.data;
+  },
+
   getSessions: async (): Promise<Array<{
     id: number;
     created_at: string | null;
@@ -137,6 +147,34 @@ export const authApi = {
 
   revokeSession: async (id: number): Promise<{ message: string }> => {
     const response = await api.post(`/auth/sessions/${id}/revoke`);
+    return response.data;
+  },
+
+  getNotificationPreferences: async (): Promise<{
+    health_alerts: boolean;
+    offline_alerts: boolean;
+    job_failures: boolean;
+    security_events: boolean;
+    weekly_reports: boolean;
+  }> => {
+    const response = await api.get('/auth/me/notifications');
+    return response.data;
+  },
+
+  updateNotificationPreferences: async (data: {
+    health_alerts?: boolean;
+    offline_alerts?: boolean;
+    job_failures?: boolean;
+    security_events?: boolean;
+    weekly_reports?: boolean;
+  }): Promise<{
+    health_alerts: boolean;
+    offline_alerts: boolean;
+    job_failures: boolean;
+    security_events: boolean;
+    weekly_reports: boolean;
+  }> => {
+    const response = await api.put('/auth/me/notifications', data);
     return response.data;
   },
 };
@@ -323,19 +361,45 @@ export const settingsApi = {
     const response = await api.get('/settings');
     return response.data;
   },
+};
 
+// Admin API
+export const adminApi = {
   getSmtp: async (): Promise<{ success: boolean; settings: SmtpSettings }> => {
-    const response = await api.get('/settings/notifications/smtp');
+    const response = await api.get('/admin/smtp');
     return response.data;
   },
 
   updateSmtp: async (settings: Partial<SmtpSettings>) => {
-    const response = await api.post('/settings/notifications/smtp', settings);
+    const response = await api.put('/admin/smtp', settings);
     return response.data;
   },
 
   testSmtp: async (settings: Partial<SmtpSettings>) => {
-    const response = await api.post('/settings/notifications/smtp/test', settings);
+    const response = await api.post('/admin/smtp/test', settings);
+    return response.data;
+  },
+};
+
+// API Tokens
+export const apiTokensApi = {
+  list: async () => {
+    const response = await api.get('/auth/me/tokens');
+    return response.data;
+  },
+
+  create: async (data: { name: string; permissions: string[]; expires_in_days?: number }) => {
+    const response = await api.post('/auth/me/tokens', data);
+    return response.data;
+  },
+
+  delete: async (tokenId: number) => {
+    const response = await api.delete(`/auth/me/tokens/${tokenId}`);
+    return response.data;
+  },
+
+  getPermissions: async () => {
+    const response = await api.get('/auth/me/tokens/permissions');
     return response.data;
   },
 };

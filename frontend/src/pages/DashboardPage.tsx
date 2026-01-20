@@ -13,7 +13,7 @@ import { Bar, BarChart } from 'recharts';
 import type { DashboardAnalytics, PrinterStatus } from '@/types/api';
 
 export function DashboardPage() {
-  const { data: printers, isLoading, refetch, isRefetching } = useQuery<PrinterStatus[]>({
+  const { data: printers, isLoading } = useQuery<PrinterStatus[]>({
     queryKey: ['dashboard', 'status'],
     queryFn: dashboardApi.getStatus,
     refetchInterval: 30000, // Refresh every 30 seconds

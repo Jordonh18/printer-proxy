@@ -97,7 +97,16 @@ server {
     access_log /var/log/nginx/printer-proxy-access.log;
     error_log /var/log/nginx/printer-proxy-error.log;
 
+    # Serve React frontend
     location / {
+        root /opt/printer-proxy/frontend/dist;
+        try_files $uri /index.html;
+        expires 1h;
+        add_header Cache-Control "public, must-revalidate";
+    }
+
+    # Proxy API requests to Flask backend
+    location /api/ {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -108,9 +117,18 @@ server {
         proxy_read_timeout 30s;
     }
 
+    # Static assets with long cache
     location /static/ {
         alias /opt/printer-proxy/static/;
-        expires 1d;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Frontend assets with cache
+    location /assets/ {
+        root /opt/printer-proxy/frontend/dist;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
     }
 }
 NGINX_EOF

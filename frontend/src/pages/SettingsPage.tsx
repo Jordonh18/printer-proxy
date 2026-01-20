@@ -1,13 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { appApi, updateApi, settingsApi } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from '@/components/ui/card';
+import { authApi } from '@/lib/api';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -19,36 +17,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { QRCodeCanvas } from 'qrcode.react';
 import { useTranslation } from 'react-i18next';
 import moment from 'moment-timezone';
-import {
-  Download,
-  CheckCircle,
-  AlertCircle,
-  Loader2,
-  Mail,
-} from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { APITokensTab } from '@/components/settings/APITokensTab';
 import i18n from '@/i18n';
-import { authApi } from '@/lib/api';
-import type { AppInfo, SmtpSettings } from '@/types/api';
 
 export function SettingsPage() {
   const { t } = useTranslation();
   const { user, checkAuth } = useAuth();
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'account';
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
-  const [updateMessage, setUpdateMessage] = useState('');
-  const [smtpMessage, setSmtpMessage] = useState('');
   const [notificationPrefs, setNotificationPrefs] = useState({
     healthAlerts: true,
     offlineAlerts: true,
     jobFailures: true,
     securityEvents: true,
-    weeklyReports: false,
   });
+  const [isSavingNotifications, setIsSavingNotifications] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [notificationError, setNotificationError] = useState('');
   const [accountForm, setAccountForm] = useState({
     username: '',
     email: '',
@@ -90,32 +79,10 @@ export function SettingsPage() {
       });
     }
   }, [user]);
-  const [smtpSettings, setSmtpSettings] = useState<SmtpSettings>({
-    enabled: false,
-    host: '',
-    port: 587,
-    username: '',
-    password: '',
-    from_address: '',
-    to_addresses: '',
-    use_tls: true,
-    use_ssl: false,
-  });
 
-  const { data: appInfo } = useQuery<AppInfo>({
-    queryKey: ['app', 'info'],
-    queryFn: appApi.getInfo,
-  });
-
-  const { data: updateStatus, refetch: refetchUpdate } = useQuery({
-    queryKey: ['update', 'status'],
-    queryFn: updateApi.getStatus,
-    refetchInterval: 10000,
-  });
-
-  const { data: smtpData, refetch: refetchSmtp } = useQuery({
-    queryKey: ['settings', 'smtp'],
-    queryFn: settingsApi.getSmtp,
+  const { data: notificationPrefsData } = useQuery({
+    queryKey: ['auth', 'notifications'],
+    queryFn: authApi.getNotificationPreferences,
   });
 
   const { data: sessions, refetch: refetchSessions, isLoading: isSessionsLoading } = useQuery({
@@ -125,83 +92,16 @@ export function SettingsPage() {
   });
 
   useEffect(() => {
-    if (smtpData?.settings) {
-      setSmtpSettings({
-        enabled: !!smtpData.settings.enabled,
-        host: smtpData.settings.host || '',
-        port: smtpData.settings.port || 587,
-        username: smtpData.settings.username || '',
-        password: smtpData.settings.password === '********' ? '' : (smtpData.settings.password || ''),
-        from_address: smtpData.settings.from_address || '',
-        to_addresses: smtpData.settings.to_addresses || '',
-        use_tls: smtpData.settings.use_tls ?? true,
-        use_ssl: smtpData.settings.use_ssl ?? false,
+    if (notificationPrefsData) {
+      setNotificationPrefs({
+        healthAlerts: notificationPrefsData.health_alerts ?? true,
+        offlineAlerts: notificationPrefsData.offline_alerts ?? true,
+        jobFailures: notificationPrefsData.job_failures ?? true,
+        securityEvents: notificationPrefsData.security_events ?? true,
       });
     }
-  }, [smtpData]);
+  }, [notificationPrefsData]);
 
-  const handleCheckUpdate = async () => {
-    setIsCheckingUpdate(true);
-    setUpdateMessage('');
-    try {
-      const result = await updateApi.check();
-      if (result.update_available) {
-        setUpdateMessage(`Update available: ${result.available_version}`);
-      } else {
-        setUpdateMessage('You are running the latest version.');
-      }
-      refetchUpdate();
-    } catch {
-      setUpdateMessage('Failed to check for updates.');
-    } finally {
-      setIsCheckingUpdate(false);
-    }
-  };
-
-  const handleStartUpdate = async () => {
-    if (confirm('Are you sure you want to start the update? The application will restart.')) {
-      try {
-        await updateApi.start();
-        refetchUpdate();
-      } catch {
-        setUpdateMessage('Failed to start update.');
-      }
-    }
-  };
-
-  const handleSaveSmtp = async () => {
-    setSmtpMessage('');
-    try {
-      await settingsApi.updateSmtp(smtpSettings);
-      setSmtpMessage('SMTP settings saved.');
-      refetchSmtp();
-    } catch {
-      setSmtpMessage('Failed to save SMTP settings.');
-    }
-  };
-
-  const handleTestSmtp = async () => {
-    setSmtpMessage('');
-    try {
-      const result = await settingsApi.testSmtp(smtpSettings);
-      if (result.success) {
-        setSmtpMessage(result.message || 'Test email sent successfully.');
-      } else {
-        setSmtpMessage(result.error || 'Failed to send test email.');
-      }
-    } catch {
-      setSmtpMessage('Failed to send test email.');
-    }
-  };
-
-  const smtpRequiredFields = [
-    smtpSettings.host.trim(),
-    smtpSettings.port,
-    smtpSettings.from_address.trim(),
-    smtpSettings.to_addresses.trim(),
-  ];
-  const isSmtpComplete = smtpRequiredFields.every((value) => !!value);
-  const smtpSaveDisabled = smtpSettings.enabled && !isSmtpComplete;
   const canCloseRecoveryModal = recoveryCopied || recoveryDownloaded;
 
   const handleDownloadRecoveryCodes = () => {
@@ -225,10 +125,6 @@ export function SettingsPage() {
       preferencesForm.timezone !== ((user.timezone || 'UTC').toUpperCase() === 'UTC' ? 'UTC' : (user.timezone || 'UTC')));
 
   const tabMeta: Record<string, { title: string; description: string }> = {
-    general: {
-      title: t('general'),
-      description: t('settingsMetaGeneral'),
-    },
     account: {
       title: t('accountInfo'),
       description: t('settingsMetaAccount'),
@@ -260,85 +156,11 @@ export function SettingsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold">{t('settings')}</h1>
+        <h1 className="text-2xl font-bold">{activeMeta.title}</h1>
         <p className="text-muted-foreground">
-          {activeMeta.title} · {activeMeta.description}
+          {activeMeta.description}
         </p>
       </div>
-
-      {activeTab === 'general' && (
-        <div className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-1">
-              <CardHeader>
-                <CardTitle>{t('application')}</CardTitle>
-                <CardDescription>{t('applicationDesc')}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Application</span>
-                  <span className="font-medium">{appInfo?.app_name || 'Printer Proxy'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Version</span>
-                  <Badge variant="outline">{appInfo?.version_string || 'Loading...'}</Badge>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle>{t('updates')}</CardTitle>
-                <CardDescription>{t('updatesDesc')}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{t('currentVersion')}</span>
-                  <span className="font-medium">{appInfo?.version || '—'}</span>
-                </div>
-
-                {updateStatus?.update_available && (
-                  <div className="flex items-center gap-2 rounded-lg bg-warning-bg p-3 text-sm">
-                    <AlertCircle className="h-4 w-4 text-warning" />
-                    <span>{t('updateAvailable')}: {updateStatus.available_version}</span>
-                  </div>
-                )}
-
-                {updateStatus?.is_updating && (
-                  <div className="flex items-center gap-2 rounded-lg bg-info-bg p-3 text-sm">
-                    <Loader2 className="h-4 w-4 animate-spin text-info" />
-                    <span>{t('updateInProgress')}</span>
-                  </div>
-                )}
-
-                {updateMessage && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CheckCircle className="h-4 w-4" />
-                    {updateMessage}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={handleCheckUpdate}
-                    disabled={isCheckingUpdate || updateStatus?.is_updating}
-                  >
-                    {isCheckingUpdate ? <Loader2 className="h-4 w-4 animate-spin" /> : t('checkUpdates')}
-                  </Button>
-
-                  {updateStatus?.update_available && !updateStatus?.is_updating && (
-                    <Button onClick={handleStartUpdate}>
-                      <Download className="h-4 w-4" />
-                      {t('installUpdate')}
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      )}
 
       {activeTab === 'account' && (
         <div className="space-y-6">
@@ -914,292 +736,153 @@ export function SettingsPage() {
               <CardTitle>{t('notificationsPrefs')}</CardTitle>
               <CardDescription>{t('notificationsPrefsDesc')}</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 lg:grid-cols-2">
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t('healthAlerts')}</p>
-                  <p className="text-xs text-muted-foreground">{t('healthAlertsDesc')}</p>
+            <CardContent className="space-y-4">
+              {notificationError && (
+                <div className="rounded-lg bg-error-bg p-3 text-sm text-error">
+                  {notificationError}
                 </div>
-                <Switch
-                  checked={notificationPrefs.healthAlerts}
-                  onCheckedChange={(value) =>
-                    setNotificationPrefs((prev) => ({ ...prev, healthAlerts: value }))
-                  }
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t('offlineAlerts')}</p>
-                  <p className="text-xs text-muted-foreground">{t('offlineAlertsDesc')}</p>
-                </div>
-                <Switch
-                  checked={notificationPrefs.offlineAlerts}
-                  onCheckedChange={(value) =>
-                    setNotificationPrefs((prev) => ({ ...prev, offlineAlerts: value }))
-                  }
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t('jobFailures')}</p>
-                  <p className="text-xs text-muted-foreground">{t('jobFailuresDesc')}</p>
-                </div>
-                <Switch
-                  checked={notificationPrefs.jobFailures}
-                  onCheckedChange={(value) =>
-                    setNotificationPrefs((prev) => ({ ...prev, jobFailures: value }))
-                  }
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t('securityEvents')}</p>
-                  <p className="text-xs text-muted-foreground">{t('securityEventsDesc')}</p>
-                </div>
-                <Switch
-                  checked={notificationPrefs.securityEvents}
-                  onCheckedChange={(value) =>
-                    setNotificationPrefs((prev) => ({ ...prev, securityEvents: value }))
-                  }
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t('weeklyReports')}</p>
-                  <p className="text-xs text-muted-foreground">{t('weeklyReportsDesc')}</p>
-                </div>
-                <Switch
-                  checked={notificationPrefs.weeklyReports}
-                  onCheckedChange={(value) =>
-                    setNotificationPrefs((prev) => ({ ...prev, weeklyReports: value }))
-                  }
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className={!smtpSettings.enabled ? 'opacity-60' : undefined}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Mail className="h-5 w-5" />
-                {t('emailDelivery')}
-              </CardTitle>
-              <CardDescription>{t('emailDeliveryDesc')}</CardDescription>
-              <CardAction>
-                <Switch
-                  checked={smtpSettings.enabled}
-                  onCheckedChange={(value) =>
-                    setSmtpSettings({ ...smtpSettings, enabled: value })
-                  }
-                  className="data-checked:bg-[var(--switch-on)]"
-                  style={{ ['--switch-on' as never]: 'oklch(0.72 0.19 145)' }}
-                />
-              </CardAction>
-            </CardHeader>
-            <AnimatePresence initial={false}>
-              {smtpSettings.enabled && (
-                <motion.div
-                  key="smtp-settings"
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.25, ease: 'easeOut' }}
-                  className="overflow-hidden"
-                >
-                  <CardContent className="space-y-6">
-                    {smtpMessage && (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <CheckCircle className="h-4 w-4" />
-                        {smtpMessage}
-                      </div>
-                    )}
-
-                    <Separator />
-
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="smtp-host">
-                          {t('smtpHost')} <span className="text-error">*</span>
-                        </Label>
-                        <Input
-                          id="smtp-host"
-                          value={smtpSettings.host}
-                          onChange={(e) => setSmtpSettings({ ...smtpSettings, host: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="smtp-port">
-                          {t('smtpPort')} <span className="text-error">*</span>
-                        </Label>
-                        <Input
-                          id="smtp-port"
-                          type="number"
-                          value={smtpSettings.port}
-                          onChange={(e) => setSmtpSettings({ ...smtpSettings, port: Number(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="smtp-username">{t('smtpUsername')}</Label>
-                        <Input
-                          id="smtp-username"
-                          value={smtpSettings.username}
-                          onChange={(e) => setSmtpSettings({ ...smtpSettings, username: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="smtp-password">{t('smtpPassword')}</Label>
-                        <Input
-                          id="smtp-password"
-                          type="password"
-                          value={smtpSettings.password}
-                          onChange={(e) => setSmtpSettings({ ...smtpSettings, password: e.target.value })}
-                          placeholder={smtpSettings.password === '********' ? '********' : ''}
-                        />
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="smtp-from">
-                          {t('smtpFrom')} <span className="text-error">*</span>
-                        </Label>
-                        <Input
-                          id="smtp-from"
-                          value={smtpSettings.from_address}
-                          onChange={(e) => setSmtpSettings({ ...smtpSettings, from_address: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="smtp-to">
-                          {t('smtpTo')} <span className="text-error">*</span>
-                        </Label>
-                        <Input
-                          id="smtp-to"
-                          value={smtpSettings.to_addresses}
-                          onChange={(e) => setSmtpSettings({ ...smtpSettings, to_addresses: e.target.value })}
-                          placeholder="comma-separated"
-                        />
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    <div className="flex flex-wrap items-center gap-6">
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          checked={smtpSettings.use_tls}
-                          onCheckedChange={(value) =>
-                            setSmtpSettings({ ...smtpSettings, use_tls: value === true })
-                          }
-                        />
-                        <Label>{t('useTls')}</Label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          checked={smtpSettings.use_ssl}
-                          onCheckedChange={(value) =>
-                            setSmtpSettings({ ...smtpSettings, use_ssl: value === true })
-                          }
-                        />
-                        <Label>{t('useSsl')}</Label>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button onClick={handleSaveSmtp} disabled={smtpSaveDisabled}>
-                        {t('saveSettings')}
-                      </Button>
-                      <Button variant="outline" onClick={handleTestSmtp} disabled={!isSmtpComplete}>
-                        {t('sendTestEmail')}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </motion.div>
               )}
-            </AnimatePresence>
-          </Card>
-        </div>
-      )}
-
-      {activeTab === 'api-tokens' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('apiTokens')}</CardTitle>
-              <CardDescription>{t('apiTokensDesc')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Primary Automation</p>
-                  <p className="text-xs text-muted-foreground">Last used 2 days ago</p>
+              {notificationMessage && (
+                <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
+                  {notificationMessage}
                 </div>
-                <Badge variant="outline">Active</Badge>
+              )}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{t('healthAlerts')}</p>
+                    <p className="text-xs text-muted-foreground">{t('healthAlertsDesc')}</p>
+                  </div>
+                  <Switch
+                    checked={notificationPrefs.healthAlerts}
+                    disabled={isSavingNotifications}
+                    onCheckedChange={async (value) => {
+                      const newPrefs = { ...notificationPrefs, healthAlerts: value };
+                      setNotificationPrefs(newPrefs);
+                      setIsSavingNotifications(true);
+                      setNotificationError('');
+                      setNotificationMessage('');
+                      try {
+                        await authApi.updateNotificationPreferences({
+                          health_alerts: value,
+                          offline_alerts: notificationPrefs.offlineAlerts,
+                          job_failures: notificationPrefs.jobFailures,
+                          security_events: notificationPrefs.securityEvents,
+                        });
+                        setNotificationMessage('Notification preferences updated');
+                        setTimeout(() => setNotificationMessage(''), 3000);
+                      } catch (err) {
+                        setNotificationError('Failed to update preferences');
+                        setNotificationPrefs(notificationPrefs);
+                      } finally {
+                        setIsSavingNotifications(false);
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{t('offlineAlerts')}</p>
+                    <p className="text-xs text-muted-foreground">{t('offlineAlertsDesc')}</p>
+                  </div>
+                  <Switch
+                    checked={notificationPrefs.offlineAlerts}
+                    disabled={isSavingNotifications}
+                    onCheckedChange={async (value) => {
+                      const newPrefs = { ...notificationPrefs, offlineAlerts: value };
+                      setNotificationPrefs(newPrefs);
+                      setIsSavingNotifications(true);
+                      setNotificationError('');
+                      setNotificationMessage('');
+                      try {
+                        await authApi.updateNotificationPreferences({
+                          health_alerts: notificationPrefs.healthAlerts,
+                          offline_alerts: value,
+                          job_failures: notificationPrefs.jobFailures,
+                          security_events: notificationPrefs.securityEvents,
+                        });
+                        setNotificationMessage('Notification preferences updated');
+                        setTimeout(() => setNotificationMessage(''), 3000);
+                      } catch (err) {
+                        setNotificationError('Failed to update preferences');
+                        setNotificationPrefs(notificationPrefs);
+                      } finally {
+                        setIsSavingNotifications(false);
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{t('jobFailures')}</p>
+                    <p className="text-xs text-muted-foreground">{t('jobFailuresDesc')}</p>
+                  </div>
+                  <Switch
+                    checked={notificationPrefs.jobFailures}
+                    disabled={isSavingNotifications}
+                    onCheckedChange={async (value) => {
+                      const newPrefs = { ...notificationPrefs, jobFailures: value };
+                      setNotificationPrefs(newPrefs);
+                      setIsSavingNotifications(true);
+                      setNotificationError('');
+                      setNotificationMessage('');
+                      try {
+                        await authApi.updateNotificationPreferences({
+                          health_alerts: notificationPrefs.healthAlerts,
+                          offline_alerts: notificationPrefs.offlineAlerts,
+                          job_failures: value,
+                          security_events: notificationPrefs.securityEvents,
+                        });
+                        setNotificationMessage('Notification preferences updated');
+                        setTimeout(() => setNotificationMessage(''), 3000);
+                      } catch (err) {
+                        setNotificationError('Failed to update preferences');
+                        setNotificationPrefs(notificationPrefs);
+                      } finally {
+                        setIsSavingNotifications(false);
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{t('securityEvents')}</p>
+                    <p className="text-xs text-muted-foreground">{t('securityEventsDesc')}</p>
+                  </div>
+                  <Switch
+                    checked={notificationPrefs.securityEvents}
+                    disabled={isSavingNotifications}
+                    onCheckedChange={async (value) => {
+                      const newPrefs = { ...notificationPrefs, securityEvents: value };
+                      setNotificationPrefs(newPrefs);
+                      setIsSavingNotifications(true);
+                      setNotificationError('');
+                      setNotificationMessage('');
+                      try {
+                        await authApi.updateNotificationPreferences({
+                          health_alerts: notificationPrefs.healthAlerts,
+                          offline_alerts: notificationPrefs.offlineAlerts,
+                          job_failures: notificationPrefs.jobFailures,
+                          security_events: value,
+                        });
+                        setNotificationMessage('Notification preferences updated');
+                        setTimeout(() => setNotificationMessage(''), 3000);
+                      } catch (err) {
+                        setNotificationError('Failed to update preferences');
+                        setNotificationPrefs(notificationPrefs);
+                      } finally {
+                        setIsSavingNotifications(false);
+                      }
+                    }}
+                  />
+                </div>
               </div>
-              <Button disabled>Create new token</Button>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {activeTab === 'personal-tokens' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('personalTokens')}</CardTitle>
-              <CardDescription>{t('personalTokensDesc')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Admin CLI</p>
-                  <p className="text-xs text-muted-foreground">Created Jan 10, 2026</p>
-                </div>
-                <Button variant="outline" size="sm" disabled>
-                  Revoke
-                </Button>
-              </div>
-              <Button disabled>Generate token</Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {activeTab === 'integrations' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('integrations')}</CardTitle>
-              <CardDescription>{t('integrationsDesc')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Webhook Endpoint</p>
-                  <p className="text-xs text-muted-foreground">{t('notConfigured')}</p>
-                </div>
-                <Button variant="outline" size="sm" disabled>
-                  Configure
-                </Button>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Slack Notifications</p>
-                  <p className="text-xs text-muted-foreground">Disconnected</p>
-                </div>
-                <Button variant="outline" size="sm" disabled>
-                  Connect
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {activeTab === 'api-tokens' && <APITokensTab />}
     </div>
   );
 }

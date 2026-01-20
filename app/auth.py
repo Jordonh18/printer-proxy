@@ -151,7 +151,7 @@ def authenticate_user(username: str, password: str, client_ip: str = None) -> Tu
     return user, ""
 
 
-def create_initial_admin(username: str, password: str) -> Tuple[bool, str]:
+def create_initial_admin(username: str, password: str, email: Optional[str] = None, full_name: Optional[str] = None) -> Tuple[bool, str]:
     """Create the initial admin user if none exists."""
     # Check if any users exist
     existing = User.get_by_username(username)
@@ -165,7 +165,7 @@ def create_initial_admin(username: str, password: str) -> Tuple[bool, str]:
     
     # Create user
     password_hash = hash_password(password)
-    User.create(username, password_hash, role='admin')
+    User.create(username, password_hash, role='admin', email=email, full_name=full_name)
     
     AuditLog.log(
         username="SYSTEM",

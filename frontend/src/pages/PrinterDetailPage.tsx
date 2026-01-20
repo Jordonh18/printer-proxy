@@ -5,7 +5,6 @@ import { printersApi } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { StatusBadge } from '@/components/printers/StatusBadge';
 import { Loader2, Pencil, Trash2, RefreshCw, ExternalLink } from 'lucide-react';
 import type { PrinterStatus } from '@/types/api';
 
@@ -90,16 +89,6 @@ export function PrinterDetailPage() {
     redirect_info: null,
   };
   const isOnline = status.is_online ?? (printerStatus as unknown as { is_online?: boolean }).is_online ?? false;
-
-  const hasRedirect = status.is_redirected ?? false;
-  const isTarget = status.is_redirect_target ?? false;
-
-  const getStatus = () => {
-    if (hasRedirect) return 'redirected';
-    if (isTarget) return 'target';
-    if (isOnline) return 'online';
-    return 'offline';
-  };
 
   return (
     <div className="space-y-4">

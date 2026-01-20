@@ -14,7 +14,16 @@ import {
   Bell,
   KeyRound,
   Plug,
+  ChevronUp,
+  Server,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import {
@@ -31,17 +40,31 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
-  SidebarSeparator,
   SidebarTrigger,
 } from '@/components/ui/sidebar';
+import { NotificationBell } from './NotificationBell';
 
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Printers', href: '/printers', icon: Printer },
-  { name: 'Redirects', href: '/redirects', icon: ArrowRightLeft, roles: ['admin', 'operator'] },
-  { name: 'Audit Log', href: '/audit-logs', icon: ClipboardList, roles: ['admin'] },
-  { name: 'Users', href: '/users', icon: Users, roles: ['admin'] },
-  { name: 'Settings', href: '/settings', icon: Settings, roles: ['admin'] },
+const navigationGroups = [
+  {
+    label: 'Overview',
+    items: [
+      { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: 'Fleet',
+    items: [
+      { name: 'Printers', href: '/printers', icon: Printer },
+      { name: 'Redirects', href: '/redirects', icon: ArrowRightLeft, roles: ['admin', 'operator'] },
+    ],
+  },
+  {
+    label: 'Administration',
+    items: [
+      { name: 'Audit Log', href: '/audit-logs', icon: ClipboardList, roles: ['admin'] },
+      { name: 'Users', href: '/users', icon: Users, roles: ['admin'] },
+    ],
+  },
 ];
 
 export function DashboardLayout() {
@@ -49,11 +72,16 @@ export function DashboardLayout() {
   const location = useLocation();
   const { t } = useTranslation();
   const isSettingsRoute = location.pathname.startsWith('/settings');
+  const isAdminSettingsRoute = location.pathname.startsWith('/admin/settings');
   const activeSettingsTab = new URLSearchParams(location.search).get('tab') || 'account';
+  const activeAdminTab = new URLSearchParams(location.search).get('tab') || 'general';
 
-  const filteredNavigation = navigation.filter(
-    (item) => !item.roles || (user && item.roles.includes(user.role))
-  );
+  const filteredNavigationGroups = navigationGroups.map(group => ({
+    ...group,
+    items: group.items.filter(
+      (item) => !item.roles || (user && item.roles.includes(user.role))
+    ),
+  })).filter(group => group.items.length > 0);
 
   return (
     <SidebarProvider>
@@ -69,11 +97,66 @@ export function DashboardLayout() {
           </div>
         </SidebarHeader>
 
-        <SidebarSeparator />
-
         <SidebarContent>
           <AnimatePresence mode="wait" initial={false}>
-            {isSettingsRoute ? (
+            {isAdminSettingsRoute ? (
+              <motion.div
+                key="admin-settings-sidebar"
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 8 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="space-y-4"
+              >
+                <SidebarGroup>
+                  <SidebarGroupLabel>Admin Settings</SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton asChild tooltip="Back to Dashboard">
+                          <Link to="/dashboard">
+                            <ArrowLeft />
+                            <span>Back to Dashboard</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+
+                <SidebarGroup>
+                  <SidebarGroupLabel>Application</SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton asChild isActive={activeAdminTab === 'general'}>
+                          <Link to="/admin/settings?tab=general">
+                            <Settings />
+                            <span>General</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton asChild isActive={activeAdminTab === 'notifications'}>
+                          <Link to="/admin/settings?tab=notifications">
+                            <Bell />
+                            <span>Notifications</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton asChild isActive={activeAdminTab === 'integrations'}>
+                          <Link to="/admin/settings?tab=integrations">
+                            <Plug />
+                            <span>Integrations</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              </motion.div>
+            ) : isSettingsRoute ? (
               <motion.div
                 key="settings-sidebar"
                 initial={{ opacity: 0, x: -8 }}
@@ -99,17 +182,9 @@ export function DashboardLayout() {
                 </SidebarGroup>
 
                 <SidebarGroup>
-                  <SidebarGroupLabel>{t('account')}</SidebarGroupLabel>
+                  <SidebarGroupLabel>{t('general')}</SidebarGroupLabel>
                   <SidebarGroupContent>
                     <SidebarMenu>
-                      <SidebarMenuItem>
-                        <SidebarMenuButton asChild isActive={activeSettingsTab === 'general'}>
-                          <Link to="/settings?tab=general">
-                            <Settings />
-                            <span>{t('general')}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
                       <SidebarMenuItem>
                         <SidebarMenuButton asChild isActive={activeSettingsTab === 'account'}>
                           <Link to="/settings?tab=account">
@@ -134,35 +209,11 @@ export function DashboardLayout() {
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                </SidebarGroup>
-
-                <SidebarGroup>
-                  <SidebarGroupLabel>{t('developer')}</SidebarGroupLabel>
-                  <SidebarGroupContent>
-                    <SidebarMenu>
                       <SidebarMenuItem>
                         <SidebarMenuButton asChild isActive={activeSettingsTab === 'api-tokens'}>
                           <Link to="/settings?tab=api-tokens">
                             <KeyRound />
                             <span>{t('apiTokens')}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                      <SidebarMenuItem>
-                        <SidebarMenuButton asChild isActive={activeSettingsTab === 'personal-tokens'}>
-                          <Link to="/settings?tab=personal-tokens">
-                            <KeyRound />
-                            <span>{t('personalTokens')}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                      <SidebarMenuItem>
-                        <SidebarMenuButton asChild isActive={activeSettingsTab === 'integrations'}>
-                          <Link to="/settings?tab=integrations">
-                            <Plug />
-                            <span>{t('integrations')}</span>
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -178,52 +229,84 @@ export function DashboardLayout() {
                 exit={{ opacity: 0, x: 8 }}
                 transition={{ duration: 0.2, ease: 'easeOut' }}
               >
-                <SidebarGroup>
-                  <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-                  <SidebarGroupContent>
-                    <SidebarMenu>
-                      {filteredNavigation.map((item) => {
-                        const isActive =
-                          location.pathname === item.href ||
-                          (item.href !== '/dashboard' && location.pathname.startsWith(item.href));
+                {filteredNavigationGroups.map((group) => (
+                  <SidebarGroup key={group.label}>
+                    <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {group.items.map((item) => {
+                          const isActive =
+                            location.pathname === item.href ||
+                            (item.href !== '/dashboard' && location.pathname.startsWith(item.href));
 
-                        return (
-                          <SidebarMenuItem key={item.name}>
-                            <SidebarMenuButton asChild isActive={isActive} tooltip={item.name}>
-                              <Link to={item.href}>
-                                <item.icon />
-                                <span>{item.name}</span>
-                              </Link>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        );
-                      })}
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                </SidebarGroup>
+                          return (
+                            <SidebarMenuItem key={item.name}>
+                              <SidebarMenuButton asChild isActive={isActive} tooltip={item.name}>
+                                <Link to={item.href}>
+                                  <item.icon />
+                                  <span>{item.name}</span>
+                                </Link>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          );
+                        })}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </SidebarGroup>
+                ))}
               </motion.div>
             )}
           </AnimatePresence>
         </SidebarContent>
 
-        <SidebarSeparator />
-
         <SidebarFooter>
-          <div className="flex items-center gap-3 rounded-md px-2 py-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-              {user?.username.charAt(0).toUpperCase()}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate">{user?.username}</p>
-              <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
-            </div>
-          </div>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={logout} tooltip="Sign out">
-                <LogOut />
-                <span>Sign out</span>
-              </SidebarMenuButton>
+              <NotificationBell />
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <SidebarMenuButton
+                    size="lg"
+                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      {user?.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="text-sm font-medium truncate">{user?.username}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
+                    </div>
+                    <ChevronUp className="ml-auto" />
+                  </SidebarMenuButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  align="end"
+                  className="w-[--radix-dropdown-menu-trigger-width]"
+                >
+                  <DropdownMenuItem asChild>
+                    <Link to="/settings" className="cursor-pointer">
+                      <User className="mr-2 h-4 w-4" />
+                      <span>User Settings</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  {user?.role === 'admin' && (
+                    <DropdownMenuItem asChild>
+                      <Link to="/admin/settings" className="cursor-pointer">
+                        <Server className="mr-2 h-4 w-4" />
+                        <span>Admin Settings</span>
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={logout} className="cursor-pointer">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Sign out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarFooter>

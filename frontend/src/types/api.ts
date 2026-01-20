@@ -2,6 +2,7 @@
 export interface User {
   id: number;
   username: string;
+  full_name?: string | null;
   email?: string | null;
   role: 'admin' | 'operator' | 'viewer';
   is_active: boolean;
@@ -126,7 +127,6 @@ export interface SmtpSettings {
   username: string;
   password: string;
   from_address: string;
-  to_addresses: string;
   use_tls: boolean;
   use_ssl: boolean;
 }
@@ -148,3 +148,23 @@ export interface DiscoveredPrinter {
   model?: string;
   mac?: string;
 }
+
+// API Tokens
+export interface APIToken {
+  id: number;
+  user_id: number;
+  name: string;
+  permissions: string[];
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  token?: string; // Only included on creation
+}
+
+export interface TokenPermissions {
+  role: string;
+  permissions: string[];
+  grouped: Record<string, string[]>;
+  all_scopes: Record<string, string[]>;
+}
+

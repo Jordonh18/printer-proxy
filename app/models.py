@@ -28,6 +28,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            full_name TEXT,
             email TEXT,
             password_hash TEXT NOT NULL,
             role TEXT DEFAULT 'admin',
@@ -53,6 +54,8 @@ def init_db():
         cursor.execute("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''")
     if 'email' not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if 'full_name' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
     if 'mfa_secret' not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN mfa_secret TEXT")
     if 'mfa_enabled' not in user_columns:
@@ -65,6 +68,17 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'")
     if 'timezone' not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'UTC'")
+    if 'notification_preferences' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN notification_preferences TEXT")
+        # Set default preferences for existing users
+        default_prefs = json.dumps({
+            'health_alerts': True,
+            'offline_alerts': True,
+            'job_failures': True,
+            'security_events': True,
+            'weekly_reports': False
+        })
+        cursor.execute("UPDATE users SET notification_preferences = ? WHERE notification_preferences IS NULL", (default_prefs,))
     
     # Active redirects table
     cursor.execute("""
@@ -218,6 +232,54 @@ def init_db():
         )
     """)
     
+    # API tokens table for programmatic access
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS api_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            token_hash TEXT UNIQUE NOT NULL,
+            permissions TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_used_at TIMESTAMP,
+            expires_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+    
+    # Add index for token lookup
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_api_tokens_hash 
+        ON api_tokens(token_hash)
+    """)
+    
+    # Notifications table for storing all user notifications
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            link TEXT,
+            is_read INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            read_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+    
+    # Add indexes for notification queries
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_created 
+        ON notifications(user_id, created_at DESC)
+    """)
+    
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_unread 
+        ON notifications(user_id, is_read, created_at DESC)
+    """)
+    
     conn.commit()
     conn.close()
 
@@ -227,6 +289,7 @@ class User:
     
     def __init__(self, id: int, username: str, password_hash: str, role: str = 'admin',
                  email: Optional[str] = None,
+                 full_name: Optional[str] = None,
                  is_active: bool = True, last_login: Optional[datetime] = None,
                  failed_attempts: int = 0, locked_until: Optional[datetime] = None,
                  created_at: Optional[datetime] = None,
@@ -239,6 +302,7 @@ class User:
         self.id = id
         self.username = username
         self.email = email
+        self.full_name = full_name
         self.password_hash = password_hash
         self.role = role or 'admin'
         self.is_active = is_active
@@ -289,6 +353,7 @@ class User:
             return User(
                 id=row['id'],
                 username=row['username'],
+                full_name=row['full_name'] if 'full_name' in row.keys() else None,
                 email=row['email'] if 'email' in row.keys() else None,
                 password_hash=row['password_hash'],
                 role=row['role'] if 'role' in row.keys() else 'admin',
@@ -319,6 +384,7 @@ class User:
             return User(
                 id=row['id'],
                 username=row['username'],
+                full_name=row['full_name'] if 'full_name' in row.keys() else None,
                 email=row['email'] if 'email' in row.keys() else None,
                 password_hash=row['password_hash'],
                 role=row['role'] if 'role' in row.keys() else 'admin',
@@ -338,14 +404,15 @@ class User:
     
     @staticmethod
     def create(username: str, password_hash: str, role: str = 'admin', is_active: bool = True,
-               email: Optional[str] = None, theme: str = 'system', language: str = 'en',
+               email: Optional[str] = None, full_name: Optional[str] = None,
+               theme: str = 'system', language: str = 'en',
                timezone: str = 'UTC') -> 'User':
         """Create a new user."""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO users (username, email, password_hash, role, is_active, theme, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (username, email, password_hash, role, int(is_active), theme, language, timezone)
+            "INSERT INTO users (username, full_name, email, password_hash, role, is_active, theme, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (username, full_name, email, password_hash, role, int(is_active), theme, language, timezone)
         )
         conn.commit()
         user_id = cursor.lastrowid
@@ -354,6 +421,7 @@ class User:
         return User(
             id=user_id,
             username=username,
+            full_name=full_name,
             email=email,
             password_hash=password_hash,
             role=role,
@@ -375,6 +443,7 @@ class User:
         return [User(
             id=row['id'],
             username=row['username'],
+            full_name=row['full_name'] if 'full_name' in row.keys() else None,
             email=row['email'] if 'email' in row.keys() else None,
             password_hash=row['password_hash'],
             role=row['role'] if 'role' in row.keys() else 'admin',
@@ -404,6 +473,7 @@ class User:
             return User(
                 id=row['id'],
                 username=row['username'],
+                full_name=row['full_name'] if 'full_name' in row.keys() else None,
                 email=row['email'] if 'email' in row.keys() else None,
                 password_hash=row['password_hash'],
                 role=row['role'] if 'role' in row.keys() else 'admin',
@@ -514,18 +584,19 @@ class User:
         conn.close()
         self.password_hash = new_password_hash
 
-    def update_profile(self, username: str, email: Optional[str]):
+    def update_profile(self, username: str, email: Optional[str], full_name: Optional[str] = None):
         """Update user's profile info."""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE users SET username = ?, email = ? WHERE id = ?",
-            (username, email, self.id)
+            "UPDATE users SET username = ?, email = ?, full_name = ? WHERE id = ?",
+            (username, email, full_name, self.id)
         )
         conn.commit()
         conn.close()
         self.username = username
         self.email = email
+        self.full_name = full_name
 
     def update_preferences(self, theme: str, language: str, timezone: str):
         """Update user's preference settings."""

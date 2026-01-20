@@ -95,6 +95,10 @@ def create_app() -> Flask:
         # Start the auto-update checker
         from app.updater import init_updater
         init_updater(start_background=True)
+        
+        # Start the weekly report scheduler
+        from app.notifications import start_weekly_reports
+        start_weekly_reports()
     
     # Setup logging
     setup_logging(app)
