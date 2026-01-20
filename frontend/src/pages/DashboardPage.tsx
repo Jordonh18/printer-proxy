@@ -10,9 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { Loader2, Plus, Printer, RotateCcw } from 'lucide-react';
 import { Bar, BarChart } from 'recharts';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { DashboardAnalytics, PrinterStatus } from '@/types/api';
 
 export function DashboardPage() {
+  useDocumentTitle('Dashboard');
   const { data: printers, isLoading } = useQuery<PrinterStatus[]>({
     queryKey: ['dashboard', 'status'],
     queryFn: dashboardApi.getStatus,

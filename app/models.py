@@ -416,11 +416,18 @@ class User:
                theme: str = 'system', language: str = 'en',
                timezone: str = 'UTC') -> 'User':
         """Create a new user."""
+        default_prefs = json.dumps({
+            'health_alerts': True,
+            'offline_alerts': True,
+            'job_failures': True,
+            'security_events': True,
+            'weekly_reports': False
+        })
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO users (username, full_name, email, password_hash, role, is_active, theme, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (username, full_name, email, password_hash, role, int(is_active), theme, language, timezone)
+            "INSERT INTO users (username, full_name, email, password_hash, role, is_active, theme, language, timezone, notification_preferences) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (username, full_name, email, password_hash, role, int(is_active), theme, language, timezone, default_prefs)
         )
         conn.commit()
         user_id = cursor.lastrowid

@@ -60,19 +60,6 @@ export function NotificationBell() {
     return date.toLocaleDateString();
   };
 
-  const getNotificationIcon = (type: string) => {
-    switch (type) {
-      case 'success':
-        return '✅';
-      case 'error':
-        return '❌';
-      case 'warning':
-        return '⚠️';
-      default:
-        return 'ℹ️';
-    }
-  };
-
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -121,9 +108,6 @@ export function NotificationBell() {
                 onClick={() => handleNotificationClick(notification)}
               >
                 <div className="flex items-start gap-2 w-full">
-                  <span className="text-base flex-shrink-0">
-                    {getNotificationIcon(notification.type)}
-                  </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-sm truncate">
@@ -133,9 +117,11 @@ export function NotificationBell() {
                         <span className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2">
-                      {notification.message}
-                    </p>
+                    {notification.message && notification.message.trim() && (
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {notification.message}
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground mt-1">
                       {formatTimeAgo(notification.created_at)}
                     </p>

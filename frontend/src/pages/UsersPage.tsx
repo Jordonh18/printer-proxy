@@ -18,9 +18,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Loader2, Pencil, Trash2 } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { User } from '@/types/api';
 
 export function UsersPage() {
+  useDocumentTitle('Users');
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);

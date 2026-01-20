@@ -18,10 +18,12 @@ import {
 import { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { AppInfo, SmtpSettings } from '@/types/api';
 import { toast } from '@/lib/toast';
 
 export function AdminSettingsPage() {
+  useDocumentTitle('Admin Settings');
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'general';

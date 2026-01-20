@@ -99,13 +99,17 @@ export function useNotificationStream() {
             
             // Show toast notification
             const toastFn = sonnerToast[notification.type] || sonnerToast.info;
-            toastFn(notification.title, {
-              description: notification.message,
-              action: notification.link ? {
-                label: 'View',
-                onClick: () => window.location.href = notification.link!,
-              } : undefined,
-            });
+            const hasMessage = Boolean(notification.message && notification.message.trim());
+            toastFn(
+              notification.title,
+              {
+                ...(hasMessage ? { description: notification.message } : {}),
+                action: notification.link ? {
+                  label: 'View',
+                  onClick: () => window.location.href = notification.link!,
+                } : undefined,
+              }
+            );
 
             // Invalidate queries to refresh data
             queryClient.invalidateQueries({ queryKey: ['notifications'] });

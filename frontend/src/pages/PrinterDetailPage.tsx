@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Trash2, RefreshCw, ExternalLink } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { PrinterStatus } from '@/types/api';
 
 export function PrinterDetailPage() {
@@ -23,6 +24,8 @@ export function PrinterDetailPage() {
     queryFn: () => printersApi.getById(id!),
     refetchInterval: 10000,
   });
+
+  useDocumentTitle(printerStatus?.printer?.name || 'Printer Details');
 
   const { data: statsData } = useQuery({
     queryKey: ['printer', id, 'stats'],

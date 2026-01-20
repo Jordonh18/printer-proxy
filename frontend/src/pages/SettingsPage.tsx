@@ -22,9 +22,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { APITokensTab } from '@/components/settings/APITokensTab';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import i18n from '@/i18n';
 
 export function SettingsPage() {
+  useDocumentTitle('Settings');
   const { t } = useTranslation();
   const { user, checkAuth } = useAuth();
   const [searchParams] = useSearchParams();

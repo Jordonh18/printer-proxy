@@ -333,8 +333,8 @@ def notify_printer_offline(printer_name: str, printer_ip: str):
         notif_mgr.create_notification(
             user_id=user['id'],
             type='error',
-            title=f"Printer Offline: {printer_name}",
-            message=f"Printer '{printer_name}' ({printer_ip}) is no longer responding.",
+            title=f"{printer_name} is offline.",
+            message="",
             link=f"/printers"
         )
     
@@ -389,8 +389,8 @@ def notify_printer_online(printer_name: str, printer_ip: str):
         notif_mgr.create_notification(
             user_id=user['id'],
             type='success',
-            title=f"Printer Online: {printer_name}",
-            message=f"Printer '{printer_name}' ({printer_ip}) is now responding.",
+            title=f"{printer_name} is now responding.",
+            message="",
             link=f"/printers"
         )
     
@@ -447,20 +447,31 @@ def get_users_with_preference(preference_key: str) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     
+    default_prefs = {
+        'health_alerts': True,
+        'offline_alerts': True,
+        'job_failures': True,
+        'security_events': True,
+        'weekly_reports': False
+    }
+
     users_with_pref = []
     for row in rows:
         prefs_json = row['notification_preferences']
         if prefs_json:
             try:
                 prefs = json.loads(prefs_json)
-                if prefs.get(preference_key, False):
-                    users_with_pref.append({
-                        'id': row['id'],
-                        'username': row['username'],
-                        'email': row['email']
-                    })
             except (json.JSONDecodeError, TypeError):
-                pass
+                prefs = default_prefs
+        else:
+            prefs = default_prefs
+
+        if prefs.get(preference_key, False):
+            users_with_pref.append({
+                'id': row['id'],
+                'username': row['username'],
+                'email': row['email']
+            })
     
     return users_with_pref
 

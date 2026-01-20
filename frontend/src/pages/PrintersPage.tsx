@@ -26,9 +26,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { PrinterStatus } from '@/types/api';
 
 export function PrintersPage() {
+  useDocumentTitle('Printers');
   const queryClient = useQueryClient();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState('');

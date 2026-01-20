@@ -5,9 +5,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2 } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { AuditLog, PrinterStatus } from '@/types/api';
 
 export function AuditLogPage() {
+  useDocumentTitle('Audit Log');
   const {
     data: logs,
     isLoading,

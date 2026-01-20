@@ -13,8 +13,10 @@ import {
 import { CheckCheck, Trash2, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 
 export function NotificationsPage() {
+  useDocumentTitle('Notifications');
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const { data, isLoading } = useNotifications({
     limit: 100,
@@ -81,19 +83,6 @@ export function NotificationsPage() {
         return 'text-warning';
       default:
         return 'text-info';
-    }
-  };
-
-  const getNotificationIcon = (type: string) => {
-    switch (type) {
-      case 'success':
-        return '✅';
-      case 'error':
-        return '❌';
-      case 'warning':
-        return '⚠️';
-      default:
-        return 'ℹ️';
     }
   };
 
@@ -169,9 +158,6 @@ export function NotificationsPage() {
                     )}
                     onClick={() => handleNotificationClick(notification)}
                   >
-                    <div className="text-2xl flex-shrink-0 mt-1">
-                      {getNotificationIcon(notification.type)}
-                    </div>
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
@@ -188,9 +174,11 @@ export function NotificationsPage() {
                               <span className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />
                             )}
                           </div>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {notification.message}
-                          </p>
+                          {notification.message && notification.message.trim() && (
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {notification.message}
+                            </p>
+                          )}
                           <div className="flex items-center gap-3 mt-2">
                             <span className="text-xs text-muted-foreground">
                               {formatDate(notification.created_at)}

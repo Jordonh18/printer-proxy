@@ -19,9 +19,11 @@ import {
   Plus,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { ActiveRedirect, PrinterStatus } from '@/types/api';
 
 export function RedirectsPage() {
+  useDocumentTitle('Redirects');
   const queryClient = useQueryClient();
   const [showAddForm, setShowAddForm] = useState(false);
   const [sourceId, setSourceId] = useState('');
