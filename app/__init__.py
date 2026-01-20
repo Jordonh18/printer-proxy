@@ -10,6 +10,8 @@ from datetime import timedelta
 from flask import Flask, request
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from config.config import (
     SECRET_KEY,
@@ -24,9 +26,16 @@ from config.config import (
 )
 from app.models import init_db
 from app.auth import login_manager
+from app.rate_limiting import get_ip_for_ratelimit, handle_rate_limit_exceeded
 
 
 jwt = JWTManager()
+limiter = Limiter(
+    key_func=get_ip_for_ratelimit,
+    default_limits=["100 per minute", "1000 per hour"],
+    storage_uri="memory://",
+    strategy="fixed-window"
+)
 
 
 def create_app() -> Flask:
@@ -64,6 +73,7 @@ def create_app() -> Flask:
     # Initialize extensions
     login_manager.init_app(app)
     jwt.init_app(app)
+    limiter.init_app(app)
     
     # Enable CORS for API routes (React frontend)
     CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
@@ -216,6 +226,12 @@ def setup_logging(app: Flask):
 def register_error_handlers(app: Flask):
     """Register error handlers that return JSON for API errors."""
     from flask import jsonify, request
+    from werkzeug.exceptions import TooManyRequests
+    from app.rate_limiting import handle_rate_limit_exceeded
+    
+    # Rate limit error handler
+    app.errorhandler(429)(handle_rate_limit_exceeded)
+    app.errorhandler(TooManyRequests)(handle_rate_limit_exceeded)
     
     @app.errorhandler(404)
     def not_found_error(error):

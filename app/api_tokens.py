@@ -4,6 +4,7 @@ API Token management for programmatic access
 import secrets
 import hashlib
 import json
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
@@ -186,15 +187,19 @@ class APIToken:
     
     @staticmethod
     def update_last_used(token_id: int):
-        """Update the last_used_at timestamp."""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (token_id,)
-        )
-        conn.commit()
-        conn.close()
+        """Update the last_used_at timestamp (non-blocking)."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (token_id,)
+            )
+            conn.commit()
+            conn.close()
+        except sqlite3.OperationalError:
+            # Skip update if database is locked - this is non-critical
+            pass
     
     @staticmethod
     def delete(token_id: int, user_id: int) -> bool:

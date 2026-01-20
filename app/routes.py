@@ -32,6 +32,9 @@ from config.config import (
     SUPPORTED_PROTOCOLS
 )
 
+# Import limiter for rate limiting
+from app import limiter
+
 
 # API Blueprint only - React handles all UI
 api_bp = Blueprint('api', __name__)
@@ -210,6 +213,7 @@ def api_role_required(*roles):
 # ============================================================================
 
 @api_bp.route('/auth/login', methods=['POST'])
+@limiter.limit("5 per minute")
 def api_auth_login():
     """Authenticate user and return JWT tokens."""
     data = request.get_json()
@@ -492,6 +496,7 @@ def api_auth_mfa_setup():
 
 @api_bp.route('/auth/mfa/verify', methods=['POST'])
 @api_auth_required
+@limiter.limit("10 per minute")
 def api_auth_mfa_verify():
     """Verify MFA setup and generate recovery codes."""
     user = g.api_user
@@ -720,6 +725,7 @@ def api_auth_me_tokens_permissions():
 
 
 @api_bp.route('/auth/setup', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
 def api_auth_setup():
     """Check if setup is needed or create initial admin."""
     from app.models import get_db_connection
@@ -1460,6 +1466,7 @@ def api_user_delete(user_id: int):
 
 @api_bp.route('/audit-logs')
 @api_role_required('admin')
+@limiter.limit("30 per minute")
 def api_audit_logs():
     """Get audit logs with optional filtering."""
     limit = request.args.get('limit', 100, type=int)
@@ -1490,6 +1497,7 @@ def api_audit_logs():
 
 @api_bp.route('/discovery/scan', methods=['POST'])
 @api_role_required('admin', 'operator')
+@limiter.limit("5 per minute")
 def api_discovery_scan():
     """Start a network scan for printers."""
     discovery = get_discovery()

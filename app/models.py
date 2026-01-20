@@ -11,10 +11,18 @@ from config.config import DATABASE_PATH, DATA_DIR
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """Get a database connection with row factory."""
+    """Get a database connection with row factory and optimized settings."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DATABASE_PATH))
+    conn = sqlite3.connect(str(DATABASE_PATH), timeout=10.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    
+    # Enable WAL mode for better concurrent access
+    conn.execute('PRAGMA journal_mode=WAL')
+    # Optimize for concurrent reads/writes
+    conn.execute('PRAGMA synchronous=NORMAL')
+    conn.execute('PRAGMA cache_size=10000')
+    conn.execute('PRAGMA temp_store=MEMORY')
+    
     return conn
 
 
