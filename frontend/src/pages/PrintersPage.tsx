@@ -31,10 +31,13 @@ import type { PrinterStatus } from '@/types/api';
 export function PrintersPage() {
   const queryClient = useQueryClient();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
   const [showDiscover, setShowDiscover] = useState(false);
   const [subnet, setSubnet] = useState('');
   const [singleIp, setSingleIp] = useState('');
   const [discoverError, setDiscoverError] = useState('');
+  const [discoverStep, setDiscoverStep] = useState<'input' | 'scanning' | 'results'>('input');
+  const [tipIndex, setTipIndex] = useState(0);
   const [discoverResults, setDiscoverResults] = useState<Array<{
     ip: string;
     name?: string;
@@ -80,17 +83,29 @@ export function PrintersPage() {
       queryClient.invalidateQueries({ queryKey: ['printers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setDeletingId(null);
+      setDeleteError('');
     },
-    onError: () => {
+    onError: (err: unknown) => {
       setDeletingId(null);
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosError = err as { response?: { data?: { error?: string } } };
+        setDeleteError(axiosError.response?.data?.error || 'Failed to delete printer');
+      } else {
+        setDeleteError('Failed to delete printer');
+      }
     },
   });
 
   const discoverMutation = useMutation({
     mutationFn: () => discoveryApi.scan(singleIp || subnet || undefined),
+    onMutate: () => {
+      setDiscoverError('');
+      setDiscoverStep('scanning');
+    },
     onSuccess: (data) => {
       setDiscoverError('');
       setDiscoverResults(data.printers || []);
+      setDiscoverStep('results');
     },
     onError: (err: unknown) => {
       if (err && typeof err === 'object' && 'response' in err) {
@@ -99,6 +114,7 @@ export function PrintersPage() {
       } else {
         setDiscoverError('Discovery failed');
       }
+      setDiscoverStep('input');
     },
   });
 
@@ -194,6 +210,49 @@ export function PrintersPage() {
     }
   }, [searchParams, setSearchParams]);
 
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (!editId || !printers) return;
+    const printerStatus = printers.find((item) => item.printer.id === editId);
+    if (printerStatus) {
+      startEdit(printerStatus.printer);
+    }
+    setSearchParams((params) => {
+      params.delete('edit');
+      return params;
+    }, { replace: true });
+  }, [searchParams, setSearchParams, printers]);
+
+  useEffect(() => {
+    if (discoverStep !== 'scanning') return;
+    const timer = window.setInterval(() => {
+      setTipIndex((current) => {
+        if (DISCOVERY_TIPS.length <= 1) return 0;
+        let next = Math.floor(Math.random() * DISCOVERY_TIPS.length);
+        if (next === current) {
+          next = (next + 1) % DISCOVERY_TIPS.length;
+        }
+        return next;
+      });
+    }, 3200);
+    return () => window.clearInterval(timer);
+  }, [discoverStep]);
+
+  const DISCOVERY_TIPS = [
+    '1969: Xerox debuts the 9700, one of the first commercial laser printers.',
+    '1976: IBM ships the 3800, a high‑speed laser printer for mainframes.',
+    '1984: HP launches the original LaserJet, changing office printing.',
+    '1985: Apple’s LaserWriter helps ignite the desktop publishing boom.',
+    '1999: IPP is standardized, enabling network printing over HTTP.',
+    'Many printers still expose PJL commands for deep status inspection.',
+    'Some devices store a lifetime page count in non‑volatile memory.',
+    'RAW port 9100 originated with HP JetDirect cards in early networks.',
+    'SNMP can surface model, serial, uptime, and consumables in seconds.',
+    'Bonjour/mDNS can discover printers without DHCP reservations.',
+    'IPP Everywhere allows driverless printing on modern networks.',
+    'The first dot‑matrix printers were inspired by teletype mechanisms.',
+  ];
+
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -201,6 +260,8 @@ export function PrintersPage() {
       </div>
     );
   }
+
+  const hasPrinters = !!(printers && printers.length > 0);
 
   return (
     <div className="space-y-6">
@@ -210,13 +271,21 @@ export function PrintersPage() {
           <h1 className="text-2xl font-bold">Printers</h1>
           <p className="text-muted-foreground">Manage your network printers</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowDiscover(true)}>
-            Discover Printers
-          </Button>
-          <Button onClick={() => setIsAddModalOpen(true)}>Add Printer</Button>
-        </div>
+        {hasPrinters && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setShowDiscover(true)}>
+              Discover Printers
+            </Button>
+            <Button onClick={() => setIsAddModalOpen(true)}>Add Printer</Button>
+          </div>
+        )}
       </div>
+
+      {deleteError && (
+        <div className="rounded-lg bg-error-bg p-3 text-sm text-error">
+          {deleteError}
+        </div>
+      )}
 
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="max-w-4xl">
@@ -444,187 +513,227 @@ export function PrintersPage() {
       </Dialog>
 
       <Dialog open={showDiscover} onOpenChange={setShowDiscover}>
-        <DialogContent className="!max-w-[95vw] !w-[95vw] !max-h-[90vh] !h-[90vh] p-0 overflow-hidden">
+        <DialogContent className="!max-w-[80vw] !w-[80vw] !max-h-[70vh] !h-[70vh] p-0 overflow-hidden">
           <div className="flex h-full flex-col">
-            <div className="border-b border-border px-6 py-5">
-              <DialogHeader className="space-y-2">
-                <DialogTitle>Discover Printers</DialogTitle>
-                <DialogDescription>
-                  Scan your network and import printers into the registry.
-                </DialogDescription>
-              </DialogHeader>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-              {discoverError && (
-                <div className="rounded-lg bg-error-bg p-3 text-sm text-error">
-                  {discoverError}
+            {discoverStep === 'results' && (
+              <div className="border-b border-border px-6 py-5">
+                <DialogHeader>
+                  <DialogTitle>Discovered Printers</DialogTitle>
+                </DialogHeader>
+              </div>
+            )}
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              {discoverStep === 'input' && (
+                <div className="mx-auto flex min-h-[70vh] w-full max-w-3xl flex-col justify-center">
+                  {discoverError && (
+                    <div className="rounded-lg bg-error-bg p-3 text-sm text-error">
+                      {discoverError}
+                    </div>
+                  )}
+                  <div className="grid gap-6 lg:grid-cols-[1fr_auto_1fr] lg:items-end">
+                    <div className="space-y-3">
+                      <Label htmlFor="discover-subnet" className="text-sm">Network (CIDR)</Label>
+                      <Input
+                        id="discover-subnet"
+                        placeholder="192.168.1.0/24"
+                        value={subnet}
+                        onChange={(e) => setSubnet(e.target.value)}
+                        className="h-12 text-base"
+                      />
+                    </div>
+                    <div className="text-xs font-medium text-muted-foreground text-center">OR</div>
+                    <div className="space-y-3">
+                      <Label htmlFor="discover-single" className="text-sm">Single IP</Label>
+                      <Input
+                        id="discover-single"
+                        placeholder="10.0.0.23"
+                        value={singleIp}
+                        onChange={(e) => setSingleIp(e.target.value)}
+                        className="h-12 text-base"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-6 flex justify-center">
+                    <Button
+                      size="lg"
+                      className="h-12 px-14 text-base"
+                      onClick={() => discoverMutation.mutate()}
+                      disabled={discoverMutation.isPending}
+                    >
+                      {discoverMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Scan'}
+                    </Button>
+                  </div>
                 </div>
               )}
-              <section className="space-y-4 rounded-lg border border-border px-4 py-4">
-                <div>
-                  <h3 className="text-sm font-semibold">Network Scan</h3>
-                  <p className="text-xs text-muted-foreground">Choose a CIDR or single IP to scan.</p>
-                </div>
-                <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr_auto] lg:items-end">
-                  <div className="space-y-2">
-                    <Label htmlFor="discover-subnet">Network to scan (CIDR)</Label>
-                    <Input
-                      id="discover-subnet"
-                      placeholder="e.g. 192.168.1.0/24"
-                      value={subnet}
-                      onChange={(e) => setSubnet(e.target.value)}
-                    />
-                  </div>
-                  <div className="text-xs font-medium text-muted-foreground text-center">OR</div>
-                  <div className="space-y-2">
-                    <Label htmlFor="discover-single">Scan single IP</Label>
-                    <Input
-                      id="discover-single"
-                      placeholder="e.g. 10.0.0.23"
-                      value={singleIp}
-                      onChange={(e) => setSingleIp(e.target.value)}
-                    />
-                  </div>
-                  <Button onClick={() => discoverMutation.mutate()} disabled={discoverMutation.isPending}>
-                    {discoverMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Scan'}
-                  </Button>
-                </div>
-              </section>
 
-              {discoverResults.length > 0 && (
-                <section className="space-y-4 rounded-lg border border-border">
-                  <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                    <div>
-                      <h3 className="text-sm font-semibold">Discovered Printers</h3>
-                      <p className="text-xs text-muted-foreground">Edit values before importing.</p>
-                    </div>
-                    <div className="text-xs text-muted-foreground">{discoverResults.length} found</div>
+              {discoverStep === 'scanning' && (
+                <div className="flex min-h-[70vh] flex-col items-center justify-center text-center">
+                  <div className="flex h-48 w-48 items-center justify-center rounded-2xl bg-primary/5">
+                    <svg
+                      className="h-32 w-32 text-primary"
+                      viewBox="0 0 200 200"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <rect x="40" y="55" width="120" height="70" rx="12" className="fill-primary/15" />
+                      <rect x="60" y="40" width="80" height="25" rx="6" className="fill-primary/25" />
+                      <rect x="70" y="120" width="60" height="35" rx="6" className="fill-primary/20" />
+                      <circle cx="150" cy="90" r="4" className="fill-primary" />
+                      <path d="M30 150h140" className="stroke-primary/30" strokeWidth="6" strokeLinecap="round" />
+                      <circle cx="30" cy="150" r="6" className="fill-primary/40">
+                        <animate attributeName="cx" values="30;170;30" dur="2.8s" repeatCount="indefinite" />
+                      </circle>
+                    </svg>
                   </div>
-                  <div className="max-h-[45vh] overflow-y-auto">
-                    <div className="w-full overflow-x-auto">
-                      <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="px-4">IP Address</TableHead>
-                          <TableHead className="px-4">Name</TableHead>
-                          <TableHead className="px-4">Model</TableHead>
-                          <TableHead className="px-4">Location</TableHead>
-                          <TableHead className="px-4">Host</TableHead>
-                          <TableHead className="px-4">Method</TableHead>
-                          <TableHead className="px-4">Caps</TableHead>
-                          <TableHead className="px-4 text-right">Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {discoverResults.map((printer) => (
-                          <TableRow
-                            key={printer.ip}
-                            className={importedIps.has(printer.ip) ? 'bg-emerald-50' : undefined}
-                          >
-                            <TableCell className="px-4 text-sm font-mono">{printer.ip}</TableCell>
-                            <TableCell className="px-4">
-                              <Input
-                                value={printer.name || ''}
-                                onChange={(e) =>
-                                  setDiscoverResults((current) =>
-                                    current.map((item) =>
-                                      item.ip === printer.ip
-                                        ? { ...item, name: e.target.value }
-                                        : item
-                                    )
-                                  )
-                                }
-                              />
-                            </TableCell>
-                            <TableCell className="px-4">
-                              <Input
-                                value={printer.model || ''}
-                                onChange={(e) =>
-                                  setDiscoverResults((current) =>
-                                    current.map((item) =>
-                                      item.ip === printer.ip
-                                        ? { ...item, model: e.target.value }
-                                        : item
-                                    )
-                                  )
-                                }
-                              />
-                            </TableCell>
-                            <TableCell className="px-4">
-                              <Input
-                                value={printer.location || ''}
-                                onChange={(e) =>
-                                  setDiscoverResults((current) =>
-                                    current.map((item) =>
-                                      item.ip === printer.ip
-                                        ? { ...item, location: e.target.value }
-                                        : item
-                                    )
-                                  )
-                                }
-                              />
-                            </TableCell>
-                            <TableCell className="px-4 text-sm text-muted-foreground">
-                              {printer.hostname || '—'}
-                            </TableCell>
-                            <TableCell className="px-4">
-                              <Badge variant="secondary">
-                                {(printer.discovery_method || 'Unknown').toUpperCase()}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="px-4">
-                              <div className="flex flex-wrap gap-2">
-                                {printer.tcp_9100_open && (
-                                  <Badge variant="outline">9100</Badge>
-                                )}
-                                {printer.snmp_available && (
-                                  <Badge variant="outline">SNMP</Badge>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="px-4 text-right">
-                              <Button
-                                variant="outline"
-                                onClick={() =>
-                                  addDiscoveredMutation.mutate({
-                                    name: printer.name || printer.ip,
-                                    ip: printer.ip,
-                                    model: printer.model || undefined,
-                                    location: printer.location || undefined,
-                                    protocols: printer.tcp_9100_open ? ['raw'] : undefined,
-                                  })
-                                }
-                                disabled={
-                                  addDiscoveredMutation.isPending || importedIps.has(printer.ip)
-                                }
+                  <h3 className="mt-6 text-xl font-semibold">Scanning for printers…</h3>
+                  <p className="mt-2 max-w-lg text-sm text-muted-foreground">{DISCOVERY_TIPS[tipIndex]}</p>
+                </div>
+              )}
+
+              {discoverStep === 'results' && (
+                <div className="space-y-4">
+                  {discoverError && (
+                    <div className="rounded-lg bg-error-bg p-3 text-sm text-error">
+                      {discoverError}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">{discoverResults.length} found</p>
+                  </div>
+                  <div className="rounded-lg border border-border">
+                    <div className="max-h-[55vh] overflow-y-auto">
+                      <div className="w-full overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="px-4">IP Address</TableHead>
+                              <TableHead className="px-4">Name</TableHead>
+                              <TableHead className="px-4">Model</TableHead>
+                              <TableHead className="px-4">Location</TableHead>
+                              <TableHead className="px-4">Host</TableHead>
+                              <TableHead className="px-4">Method</TableHead>
+                              <TableHead className="px-4">Caps</TableHead>
+                              <TableHead className="px-4 text-right">Action</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {discoverResults.map((printer) => (
+                              <TableRow
+                                key={printer.ip}
+                                className={importedIps.has(printer.ip) ? 'bg-emerald-50' : undefined}
                               >
-                                {importedIps.has(printer.ip)
-                                  ? 'Imported'
-                                  : importingIp === printer.ip
-                                    ? 'Importing…'
-                                    : 'Import'}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                      </Table>
+                                <TableCell className="px-4 text-sm font-mono">{printer.ip}</TableCell>
+                                <TableCell className="px-4">
+                                  <Input
+                                    value={printer.name || ''}
+                                    onChange={(e) =>
+                                      setDiscoverResults((current) =>
+                                        current.map((item) =>
+                                          item.ip === printer.ip
+                                            ? { ...item, name: e.target.value }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="px-4">
+                                  <Input
+                                    value={printer.model || ''}
+                                    onChange={(e) =>
+                                      setDiscoverResults((current) =>
+                                        current.map((item) =>
+                                          item.ip === printer.ip
+                                            ? { ...item, model: e.target.value }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="px-4">
+                                  <Input
+                                    value={printer.location || ''}
+                                    onChange={(e) =>
+                                      setDiscoverResults((current) =>
+                                        current.map((item) =>
+                                          item.ip === printer.ip
+                                            ? { ...item, location: e.target.value }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="px-4 text-sm text-muted-foreground">
+                                  {printer.hostname || '—'}
+                                </TableCell>
+                                <TableCell className="px-4">
+                                  <Badge variant="secondary">
+                                    {(printer.discovery_method || 'Unknown').toUpperCase()}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="px-4">
+                                  <div className="flex flex-wrap gap-2">
+                                    {printer.tcp_9100_open && (
+                                      <Badge variant="outline">9100</Badge>
+                                    )}
+                                    {printer.snmp_available && (
+                                      <Badge variant="outline">SNMP</Badge>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="px-4 text-right">
+                                  <Button
+                                    variant="outline"
+                                    onClick={() =>
+                                      addDiscoveredMutation.mutate({
+                                        name: printer.name || printer.ip,
+                                        ip: printer.ip,
+                                        model: printer.model || undefined,
+                                        location: printer.location || undefined,
+                                        protocols: printer.tcp_9100_open ? ['raw'] : undefined,
+                                      })
+                                    }
+                                    disabled={
+                                      addDiscoveredMutation.isPending || importedIps.has(printer.ip)
+                                    }
+                                  >
+                                    {importedIps.has(printer.ip)
+                                      ? 'Imported'
+                                      : importingIp === printer.ip
+                                        ? 'Importing…'
+                                        : 'Import'}
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
                   </div>
-                </section>
+                </div>
               )}
             </div>
-            <div className="border-t border-border px-6 py-4 flex justify-end bg-background sticky bottom-0">
-              <Button variant="outline" onClick={() => setShowDiscover(false)}>Close</Button>
-            </div>
+            {discoverStep === 'results' && (
+              <div className="border-t border-border px-6 py-4 flex justify-end bg-background sticky bottom-0">
+                <Button variant="outline" onClick={() => {
+                  setShowDiscover(false);
+                  setDiscoverStep('input');
+                }}>
+                  Close
+                </Button>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
 
       {/* Printers table */}
-      <Card>
-        <CardContent className="p-0">
-          {printers && printers.length > 0 ? (
+      {hasPrinters ? (
+        <Card className="gap-0 py-0">
+          <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -637,11 +746,14 @@ export function PrintersPage() {
               </TableHeader>
               <TableBody>
                 {printers.map((printerStatus) => {
-                  const { printer, is_online, has_redirect, is_target } = printerStatus;
+                  const { printer, status } = printerStatus;
+                  const isOnline = status?.is_online ?? (printerStatus as unknown as { is_online?: boolean }).is_online ?? false;
+                  const hasRedirect = status?.is_redirected ?? (printerStatus as unknown as { has_redirect?: boolean }).has_redirect ?? false;
+                  const isTarget = status?.is_redirect_target ?? (printerStatus as unknown as { is_target?: boolean }).is_target ?? false;
                   const getStatus = () => {
-                    if (has_redirect) return 'redirected';
-                    if (is_target) return 'target';
-                    if (is_online) return 'online';
+                    if (hasRedirect) return 'redirected';
+                    if (isTarget) return 'target';
+                    if (isOnline) return 'online';
                     return 'offline';
                   };
 
@@ -697,6 +809,7 @@ export function PrintersPage() {
                             aria-label={`Delete ${printer.name}`}
                             onClick={() => handleDelete(printer.id, printer.name)}
                             disabled={deleteMutation.isPending}
+                            className="delete-action"
                           >
                             {deletingId === printer.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                           </Button>
@@ -707,22 +820,37 @@ export function PrintersPage() {
                 })}
               </TableBody>
             </Table>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-                <Printer className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <h3 className="mt-4 text-lg font-medium">No printers configured</h3>
-              <p className="mt-2 text-center text-muted-foreground">
-                Get started by adding your first printer.
-              </p>
-              <Button className="mt-6" onClick={() => setIsAddModalOpen(true)}>
-                Add Printer
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+          <div className="relative">
+            <div className="absolute inset-0 -z-10 h-48 w-48 rounded-full bg-primary/5 blur-2xl" />
+            <svg
+              className="h-40 w-40 text-primary"
+            viewBox="0 0 200 200"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            >
+            <rect x="42" y="60" width="116" height="62" rx="12" className="fill-primary/15" />
+            <rect x="62" y="45" width="76" height="22" rx="6" className="fill-primary/25" />
+            <rect x="70" y="120" width="60" height="32" rx="6" className="fill-primary/20" />
+            <circle cx="148" cy="90" r="4" className="fill-primary" />
+            <path d="M35 155h130" className="stroke-primary/30" strokeWidth="6" strokeLinecap="round" />
+            </svg>
+          </div>
+          <h3 className="mt-6 text-2xl font-semibold">Your printer fleet starts here</h3>
+          <p className="mt-3 max-w-xl text-sm text-muted-foreground">
+            Add a printer or scan the network to build your registry in minutes.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Button onClick={() => setIsAddModalOpen(true)}>Add Printer</Button>
+            <Button variant="outline" onClick={() => setShowDiscover(true)}>
+              Discover Printers
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

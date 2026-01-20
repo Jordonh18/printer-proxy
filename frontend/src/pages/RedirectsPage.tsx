@@ -1,7 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { redirectsApi, printersApi } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   ArrowRightLeft,
   ArrowRight,
@@ -18,6 +27,7 @@ export function RedirectsPage() {
   const [sourceId, setSourceId] = useState('');
   const [targetId, setTargetId] = useState('');
   const [error, setError] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   const { data: redirects, isLoading } = useQuery<ActiveRedirect[]>({
     queryKey: ['redirects'],
@@ -54,6 +64,15 @@ export function RedirectsPage() {
       queryClient.invalidateQueries({ queryKey: ['redirects'] });
       queryClient.invalidateQueries({ queryKey: ['printers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      setDeleteError('');
+    },
+    onError: (err: unknown) => {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosError = err as { response?: { data?: { error?: string } } };
+        setDeleteError(axiosError.response?.data?.error || 'Failed to remove redirect');
+      } else {
+        setDeleteError('Failed to remove redirect');
+      }
     },
   });
 
@@ -94,22 +113,27 @@ export function RedirectsPage() {
           <h1 className="text-2xl font-bold">Redirects</h1>
           <p className="text-muted-foreground">Manage print traffic redirects</p>
         </div>
-        <Button onClick={() => setShowAddForm(true)}>
-          <Plus className="h-4 w-4" />
-          New Redirect
-        </Button>
+        {redirects && redirects.length > 0 && (
+          <Button onClick={() => setShowAddForm(true)}>
+            <Plus className="h-4 w-4" />
+            New Redirect
+          </Button>
+        )}
       </div>
 
-      {/* Add redirect form */}
-      {showAddForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Create Redirect</CardTitle>
-            <CardDescription>
-              Redirect print traffic from a failed printer to a working one
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      {deleteError && (
+        <div className="rounded-lg bg-error-bg p-3 text-sm text-error">
+          {deleteError}
+        </div>
+      )}
+
+      <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Create Redirect</DialogTitle>
+            <DialogDescription>Route print traffic from one printer to another.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
             {error && (
               <div className="rounded-lg bg-error-bg p-3 text-sm text-error">{error}</div>
             )}
@@ -146,87 +170,110 @@ export function RedirectsPage() {
                 </select>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => createMutation.mutate()}
-                disabled={!sourceId || !targetId || createMutation.isPending}
-              >
-                {createMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowRightLeft className="h-4 w-4" />
-                )}
-                Create Redirect
-              </Button>
-              <Button variant="outline" onClick={() => { setShowAddForm(false); setError(''); }}>
-                Cancel
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowAddForm(false); setError(''); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={!sourceId || !targetId || createMutation.isPending}
+            >
+              {createMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowRightLeft className="h-4 w-4" />
+              )}
+              Create Redirect
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Redirects list */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Active Redirects</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {redirects && redirects.length > 0 ? (
-            <div className="space-y-4">
-              {redirects.map((redirect) => (
-                <div
-                  key={redirect.id}
-                  className="flex items-center justify-between rounded-lg bg-muted p-4"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning-bg">
-                      <ArrowRightLeft className="h-5 w-5 text-warning" />
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <p className="font-medium">{getPrinterName(redirect.source_printer_id)}</p>
-                        <p className="text-xs text-muted-foreground font-mono">{redirect.source_ip}</p>
+      {redirects && redirects.length > 0 ? (
+        <Card className="gap-0 py-0">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="px-4">Source</TableHead>
+                  <TableHead className="px-4">Target</TableHead>
+                  <TableHead className="px-4">Path</TableHead>
+                  <TableHead className="px-4">Enabled By</TableHead>
+                  <TableHead className="px-4">Date</TableHead>
+                  <TableHead className="px-4 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {redirects.map((redirect) => (
+                  <TableRow key={redirect.id}>
+                    <TableCell className="px-4">
+                      <div className="font-medium">{getPrinterName(redirect.source_printer_id)}</div>
+                      <div className="text-xs text-muted-foreground font-mono">{redirect.source_ip}</div>
+                    </TableCell>
+                    <TableCell className="px-4">
+                      <div className="font-medium">{getPrinterName(redirect.target_printer_id)}</div>
+                      <div className="text-xs text-muted-foreground font-mono">{redirect.target_ip}</div>
+                    </TableCell>
+                    <TableCell className="px-4">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <ArrowRight className="h-4 w-4" />
+                        <span>{redirect.protocol.toUpperCase()}:{redirect.port}</span>
                       </div>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">{getPrinterName(redirect.target_printer_id)}</p>
-                        <p className="text-xs text-muted-foreground font-mono">{redirect.target_ip}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right text-sm">
-                      <p className="text-muted-foreground">Enabled by {redirect.enabled_by}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(redirect.enabled_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDelete(redirect.id)}
-                      disabled={deleteMutation.isPending}
-                    >
-                      <Trash2 className="h-4 w-4 text-error" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-                <ArrowRightLeft className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <h3 className="mt-4 text-lg font-medium">No active redirects</h3>
-              <p className="mt-2 text-center text-muted-foreground">
-                Create a redirect to forward print traffic from a failed printer to a working one.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    </TableCell>
+                    <TableCell className="px-4 text-sm text-muted-foreground">
+                      {redirect.enabled_by}
+                    </TableCell>
+                    <TableCell className="px-4 text-sm text-muted-foreground">
+                      {new Date(redirect.enabled_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="px-4 text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDelete(redirect.id)}
+                        disabled={deleteMutation.isPending}
+                        aria-label="Remove redirect"
+                        className="delete-action"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+          <div className="relative">
+            <div className="absolute inset-0 -z-10 h-48 w-48 rounded-full bg-primary/5 blur-2xl" />
+            <svg
+              className="h-40 w-40 text-primary"
+              viewBox="0 0 200 200"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <circle cx="60" cy="100" r="28" className="fill-primary/15" />
+              <circle cx="140" cy="100" r="28" className="fill-primary/15" />
+              <path d="M75 100h50" className="stroke-primary/30" strokeWidth="8" strokeLinecap="round" />
+              <path d="M108 90l12 10-12 10" className="stroke-primary/40" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h3 className="mt-6 text-2xl font-semibold">Redirects are standing by</h3>
+          <p className="mt-3 max-w-xl text-sm text-muted-foreground">
+            Create a redirect to keep printing online when a printer goes down.
+          </p>
+          <div className="mt-6">
+            <Button onClick={() => setShowAddForm(true)}>
+              <Plus className="h-4 w-4" />
+              New Redirect
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

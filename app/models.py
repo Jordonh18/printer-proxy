@@ -28,13 +28,20 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            email TEXT,
             password_hash TEXT NOT NULL,
             role TEXT DEFAULT 'admin',
             is_active BOOLEAN DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP,
             failed_attempts INTEGER DEFAULT 0,
-            locked_until TIMESTAMP
+            locked_until TIMESTAMP,
+            mfa_secret TEXT,
+            mfa_enabled BOOLEAN DEFAULT 0,
+            mfa_recovery_codes TEXT,
+            theme TEXT DEFAULT 'system',
+            language TEXT DEFAULT 'en',
+            timezone TEXT DEFAULT 'UTC'
         )
     """)
 
@@ -44,6 +51,20 @@ def init_db():
     if 'role' not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'")
         cursor.execute("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''")
+    if 'email' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if 'mfa_secret' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN mfa_secret TEXT")
+    if 'mfa_enabled' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN mfa_enabled BOOLEAN DEFAULT 0")
+    if 'mfa_recovery_codes' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN mfa_recovery_codes TEXT")
+    if 'theme' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'system'")
+    if 'language' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'")
+    if 'timezone' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'UTC'")
     
     # Active redirects table
     cursor.execute("""
@@ -181,6 +202,21 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # User sessions table for JWT tracking
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            jti TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revoked_at TIMESTAMP,
+            ip_address TEXT,
+            user_agent TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
     
     conn.commit()
     conn.close()
@@ -190,11 +226,19 @@ class User:
     """User model for authentication."""
     
     def __init__(self, id: int, username: str, password_hash: str, role: str = 'admin',
+                 email: Optional[str] = None,
                  is_active: bool = True, last_login: Optional[datetime] = None,
                  failed_attempts: int = 0, locked_until: Optional[datetime] = None,
-                 created_at: Optional[datetime] = None):
+                 created_at: Optional[datetime] = None,
+                 mfa_secret: Optional[str] = None,
+                 mfa_enabled: bool = False,
+                 mfa_recovery_codes: Optional[str] = None,
+                 theme: str = 'system',
+                 language: str = 'en',
+                 timezone: str = 'UTC'):
         self.id = id
         self.username = username
+        self.email = email
         self.password_hash = password_hash
         self.role = role or 'admin'
         self.is_active = is_active
@@ -202,6 +246,12 @@ class User:
         self.failed_attempts = failed_attempts
         self.locked_until = locked_until
         self.created_at = created_at
+        self.mfa_secret = mfa_secret
+        self.mfa_enabled = bool(mfa_enabled)
+        self.mfa_recovery_codes = mfa_recovery_codes
+        self.theme = theme or 'system'
+        self.language = language or 'en'
+        self.timezone = timezone or 'utc'
     
     @property
     def is_authenticated(self):
@@ -239,13 +289,20 @@ class User:
             return User(
                 id=row['id'],
                 username=row['username'],
+                email=row['email'] if 'email' in row.keys() else None,
                 password_hash=row['password_hash'],
                 role=row['role'] if 'role' in row.keys() else 'admin',
                 is_active=bool(row['is_active']),
                 last_login=row['last_login'],
                 failed_attempts=row['failed_attempts'],
                 locked_until=row['locked_until'],
-                created_at=row['created_at'] if 'created_at' in row.keys() else None
+                created_at=row['created_at'] if 'created_at' in row.keys() else None,
+                mfa_secret=row['mfa_secret'] if 'mfa_secret' in row.keys() else None,
+                mfa_enabled=bool(row['mfa_enabled']) if 'mfa_enabled' in row.keys() else False,
+                mfa_recovery_codes=row['mfa_recovery_codes'] if 'mfa_recovery_codes' in row.keys() else None,
+                theme=row['theme'] if 'theme' in row.keys() else 'system',
+                language=row['language'] if 'language' in row.keys() else 'en',
+                timezone=row['timezone'] if 'timezone' in row.keys() else 'utc'
             )
         return None
     
@@ -262,30 +319,49 @@ class User:
             return User(
                 id=row['id'],
                 username=row['username'],
+                email=row['email'] if 'email' in row.keys() else None,
                 password_hash=row['password_hash'],
                 role=row['role'] if 'role' in row.keys() else 'admin',
                 is_active=bool(row['is_active']),
                 last_login=row['last_login'],
                 failed_attempts=row['failed_attempts'],
                 locked_until=row['locked_until'],
-                created_at=row['created_at'] if 'created_at' in row.keys() else None
+                created_at=row['created_at'] if 'created_at' in row.keys() else None,
+                mfa_secret=row['mfa_secret'] if 'mfa_secret' in row.keys() else None,
+                mfa_enabled=bool(row['mfa_enabled']) if 'mfa_enabled' in row.keys() else False,
+                mfa_recovery_codes=row['mfa_recovery_codes'] if 'mfa_recovery_codes' in row.keys() else None,
+                theme=row['theme'] if 'theme' in row.keys() else 'system',
+                language=row['language'] if 'language' in row.keys() else 'en',
+                timezone=row['timezone'] if 'timezone' in row.keys() else 'utc'
             )
         return None
     
     @staticmethod
-    def create(username: str, password_hash: str, role: str = 'admin', is_active: bool = True) -> 'User':
+    def create(username: str, password_hash: str, role: str = 'admin', is_active: bool = True,
+               email: Optional[str] = None, theme: str = 'system', language: str = 'en',
+               timezone: str = 'UTC') -> 'User':
         """Create a new user."""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)",
-            (username, password_hash, role, int(is_active))
+            "INSERT INTO users (username, email, password_hash, role, is_active, theme, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (username, email, password_hash, role, int(is_active), theme, language, timezone)
         )
         conn.commit()
         user_id = cursor.lastrowid
         conn.close()
         
-        return User(id=user_id, username=username, password_hash=password_hash, role=role, is_active=is_active)
+        return User(
+            id=user_id,
+            username=username,
+            email=email,
+            password_hash=password_hash,
+            role=role,
+            is_active=is_active,
+            theme=theme,
+            language=language,
+            timezone=timezone
+        )
 
     @staticmethod
     def get_all() -> List['User']:
@@ -299,14 +375,51 @@ class User:
         return [User(
             id=row['id'],
             username=row['username'],
+            email=row['email'] if 'email' in row.keys() else None,
             password_hash=row['password_hash'],
             role=row['role'] if 'role' in row.keys() else 'admin',
             is_active=bool(row['is_active']),
             last_login=row['last_login'],
             failed_attempts=row['failed_attempts'],
             locked_until=row['locked_until'],
-            created_at=row['created_at'] if 'created_at' in row.keys() else None
+            created_at=row['created_at'] if 'created_at' in row.keys() else None,
+            mfa_secret=row['mfa_secret'] if 'mfa_secret' in row.keys() else None,
+            mfa_enabled=bool(row['mfa_enabled']) if 'mfa_enabled' in row.keys() else False,
+            mfa_recovery_codes=row['mfa_recovery_codes'] if 'mfa_recovery_codes' in row.keys() else None,
+            theme=row['theme'] if 'theme' in row.keys() else 'system',
+            language=row['language'] if 'language' in row.keys() else 'en',
+            timezone=row['timezone'] if 'timezone' in row.keys() else 'utc'
         ) for row in rows]
+
+    @staticmethod
+    def get_by_email(email: str) -> Optional['User']:
+        """Get user by email."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return User(
+                id=row['id'],
+                username=row['username'],
+                email=row['email'] if 'email' in row.keys() else None,
+                password_hash=row['password_hash'],
+                role=row['role'] if 'role' in row.keys() else 'admin',
+                is_active=bool(row['is_active']),
+                last_login=row['last_login'],
+                failed_attempts=row['failed_attempts'],
+                locked_until=row['locked_until'],
+                created_at=row['created_at'] if 'created_at' in row.keys() else None,
+                mfa_secret=row['mfa_secret'] if 'mfa_secret' in row.keys() else None,
+                mfa_enabled=bool(row['mfa_enabled']) if 'mfa_enabled' in row.keys() else False,
+                mfa_recovery_codes=row['mfa_recovery_codes'] if 'mfa_recovery_codes' in row.keys() else None,
+                theme=row['theme'] if 'theme' in row.keys() else 'system',
+                language=row['language'] if 'language' in row.keys() else 'en',
+                timezone=row['timezone'] if 'timezone' in row.keys() else 'utc'
+            )
+        return None
 
     def update_role(self, role: str):
         """Update user's role."""
@@ -401,6 +514,69 @@ class User:
         conn.close()
         self.password_hash = new_password_hash
 
+    def update_profile(self, username: str, email: Optional[str]):
+        """Update user's profile info."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET username = ?, email = ? WHERE id = ?",
+            (username, email, self.id)
+        )
+        conn.commit()
+        conn.close()
+        self.username = username
+        self.email = email
+
+    def update_preferences(self, theme: str, language: str, timezone: str):
+        """Update user's preference settings."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET theme = ?, language = ?, timezone = ? WHERE id = ?",
+            (theme, language, timezone, self.id)
+        )
+        conn.commit()
+        conn.close()
+        self.theme = theme
+        self.language = language
+        self.timezone = timezone
+
+    def set_mfa_secret(self, secret: Optional[str]):
+        """Set MFA secret."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET mfa_secret = ? WHERE id = ?",
+            (secret, self.id)
+        )
+        conn.commit()
+        conn.close()
+        self.mfa_secret = secret
+
+    def set_mfa_enabled(self, enabled: bool):
+        """Enable/disable MFA."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET mfa_enabled = ? WHERE id = ?",
+            (int(enabled), self.id)
+        )
+        conn.commit()
+        conn.close()
+        self.mfa_enabled = enabled
+
+    def set_recovery_codes(self, codes_json: Optional[str]):
+        """Store hashed recovery codes JSON."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET mfa_recovery_codes = ? WHERE id = ?",
+            (codes_json, self.id)
+        )
+        conn.commit()
+        conn.close()
+        self.mfa_recovery_codes = codes_json
+
 
 class ActiveRedirect:
     """Model for active printer redirects."""
@@ -438,7 +614,7 @@ class ActiveRedirect:
             enabled_at=row['enabled_at'],
             enabled_by=row['enabled_by']
         ) for row in rows]
-    
+
     @staticmethod
     def get_by_source_printer(printer_id: str) -> Optional['ActiveRedirect']:
         """Get redirect by source printer ID."""
@@ -450,7 +626,7 @@ class ActiveRedirect:
         )
         row = cursor.fetchone()
         conn.close()
-        
+
         if row:
             return ActiveRedirect(
                 id=row['id'],
@@ -464,7 +640,7 @@ class ActiveRedirect:
                 enabled_by=row['enabled_by']
             )
         return None
-    
+
     @staticmethod
     def get_by_source_ip(ip: str) -> Optional['ActiveRedirect']:
         """Get redirect by source IP."""
@@ -473,7 +649,7 @@ class ActiveRedirect:
         cursor.execute("SELECT * FROM active_redirects WHERE source_ip = ?", (ip,))
         row = cursor.fetchone()
         conn.close()
-        
+
         if row:
             return ActiveRedirect(
                 id=row['id'],
@@ -487,7 +663,7 @@ class ActiveRedirect:
                 enabled_by=row['enabled_by']
             )
         return None
-    
+
     @staticmethod
     def is_target_in_use(printer_id: str) -> bool:
         """Check if a printer is already being used as a target."""
@@ -500,7 +676,7 @@ class ActiveRedirect:
         count = cursor.fetchone()[0]
         conn.close()
         return count > 0
-    
+
     @staticmethod
     def create(source_printer_id: str, source_ip: str, target_printer_id: str,
                target_ip: str, protocol: str, port: int, enabled_by: str) -> 'ActiveRedirect':
@@ -518,7 +694,7 @@ class ActiveRedirect:
         conn.commit()
         redirect_id = cursor.lastrowid
         conn.close()
-        
+
         return ActiveRedirect(
             id=redirect_id,
             source_printer_id=source_printer_id,
@@ -530,19 +706,19 @@ class ActiveRedirect:
             enabled_at=enabled_at,
             enabled_by=enabled_by
         )
-    
+
     def delete(self, disabled_by: str = None, reason: str = None):
         """Delete this redirect and record in history."""
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # Calculate duration
         if isinstance(self.enabled_at, str):
             enabled_dt = datetime.fromisoformat(self.enabled_at)
         else:
             enabled_dt = self.enabled_at
         duration = int((datetime.now() - enabled_dt).total_seconds())
-        
+
         # Record in history
         cursor.execute("""
             INSERT INTO redirect_history 
@@ -556,9 +732,126 @@ class ActiveRedirect:
             datetime.now().isoformat(), disabled_by or 'system',
             duration, reason
         ))
-        
+
         # Delete active redirect
         cursor.execute("DELETE FROM active_redirects WHERE id = ?", (self.id,))
+        conn.commit()
+        conn.close()
+
+
+class UserSession:
+    """Model for JWT sessions."""
+
+    def __init__(self, id: int, user_id: int, jti: str, created_at: str,
+                 last_used: str, revoked_at: Optional[str], ip_address: Optional[str],
+                 user_agent: Optional[str]):
+        self.id = id
+        self.user_id = user_id
+        self.jti = jti
+        self.created_at = created_at
+        self.last_used = last_used
+        self.revoked_at = revoked_at
+        self.ip_address = ip_address
+        self.user_agent = user_agent
+
+    @staticmethod
+    def create(user_id: int, jti: str, ip_address: Optional[str], user_agent: Optional[str]) -> 'UserSession':
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO user_sessions (user_id, jti, ip_address, user_agent)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, jti, ip_address, user_agent)
+        )
+        conn.commit()
+        session_id = cursor.lastrowid
+        cursor.execute("SELECT * FROM user_sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return UserSession(
+            id=row['id'],
+            user_id=row['user_id'],
+            jti=row['jti'],
+            created_at=row['created_at'],
+            last_used=row['last_used'],
+            revoked_at=row['revoked_at'],
+            ip_address=row['ip_address'],
+            user_agent=row['user_agent']
+        )
+
+    @staticmethod
+    def get_by_jti(jti: str) -> Optional['UserSession']:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM user_sessions WHERE jti = ?", (jti,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return UserSession(
+                id=row['id'],
+                user_id=row['user_id'],
+                jti=row['jti'],
+                created_at=row['created_at'],
+                last_used=row['last_used'],
+                revoked_at=row['revoked_at'],
+                ip_address=row['ip_address'],
+                user_agent=row['user_agent']
+            )
+        return None
+
+    @staticmethod
+    def get_by_user(user_id: int) -> List['UserSession']:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM user_sessions WHERE user_id = ? ORDER BY last_used DESC",
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [UserSession(
+            id=row['id'],
+            user_id=row['user_id'],
+            jti=row['jti'],
+            created_at=row['created_at'],
+            last_used=row['last_used'],
+            revoked_at=row['revoked_at'],
+            ip_address=row['ip_address'],
+            user_agent=row['user_agent']
+        ) for row in rows]
+
+    @staticmethod
+    def revoke(session_id: int):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE user_sessions SET revoked_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), session_id)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def revoke_by_jti(jti: str):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE user_sessions SET revoked_at = ? WHERE jti = ?",
+            (datetime.now().isoformat(), jti)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def touch(jti: str):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE user_sessions SET last_used = ? WHERE jti = ?",
+            (datetime.now().isoformat(), jti)
+        )
         conn.commit()
         conn.close()
 
@@ -585,18 +878,34 @@ class AuditLog:
         conn.close()
     
     @staticmethod
-    def get_recent(limit: int = 100) -> List[Dict[str, Any]]:
-        """Get recent audit log entries."""
+    def get_recent(limit: int = 100, offset: int = 0,
+                   action: Optional[str] = None,
+                   username: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get recent audit log entries with optional filtering."""
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT * FROM audit_log 
-            ORDER BY timestamp DESC 
-            LIMIT ?
-        """, (limit,))
+
+        query = "SELECT * FROM audit_log"
+        params: List[Any] = []
+        filters = []
+
+        if action:
+            filters.append("action = ?")
+            params.append(action)
+        if username:
+            filters.append("username = ?")
+            params.append(username)
+
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+
+        query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
-        
+
         return [dict(row) for row in rows]
     
     @staticmethod

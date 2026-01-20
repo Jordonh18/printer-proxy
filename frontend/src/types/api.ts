@@ -2,10 +2,16 @@
 export interface User {
   id: number;
   username: string;
+  email?: string | null;
   role: 'admin' | 'operator' | 'viewer';
   is_active: boolean;
   last_login: string | null;
   created_at: string | null;
+  mfa_enabled?: boolean;
+  theme?: 'system' | 'light' | 'dark';
+  language?: string;
+  timezone?: string;
+  current_session_id?: number | null;
 }
 
 export interface AuthResponse {
@@ -21,10 +27,26 @@ export interface Printer {
   ip: string;
   location?: string;
   model?: string;
+  department?: string;
+  notes?: string;
+  protocols?: string[];
 }
 
 export interface PrinterStatus {
   printer: Printer;
+  status?: {
+    icmp_reachable: boolean;
+    tcp_reachable: boolean;
+    is_online: boolean;
+    is_redirected: boolean;
+    is_redirect_target: boolean;
+    redirect_info?: {
+      target_printer_id?: string | null;
+      target_ip?: string | null;
+      enabled_at?: string | null;
+      enabled_by?: string | null;
+    } | null;
+  };
   is_online: boolean;
   icmp_reachable: boolean;
   tcp_reachable: boolean;
@@ -69,6 +91,8 @@ export interface AuditLog {
   details: string;
   source_printer_id?: string;
   target_printer_id?: string;
+  source_ip?: string;
+  target_ip?: string;
   success: boolean;
   error_message?: string;
 }
@@ -78,6 +102,20 @@ export interface AppInfo {
   version: string;
   version_string: string;
   app_name: string;
+}
+
+export interface DashboardAnalytics {
+  top_pages: Array<{
+    printer_id: string;
+    name: string;
+    total_pages: number;
+    uptime_hours?: number;
+  }>;
+  daily_volume: Array<{
+    day: string;
+    total_pages: number;
+    total_jobs: number;
+  }>;
 }
 
 // Notification settings

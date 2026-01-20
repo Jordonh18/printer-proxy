@@ -1,17 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi } from '@/lib/api';
-import { PrinterCard } from '@/components/printers/PrinterCard';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from '@/components/ui/chart';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
-import {
-  Printer,
-  CheckCircle,
-  XCircle,
-  ArrowRightLeft,
-  Loader2,
-} from 'lucide-react';
-import type { PrinterStatus } from '@/types/api';
+import { Loader2, Plus, Printer, RotateCcw } from 'lucide-react';
+import { Bar, BarChart } from 'recharts';
+import type { DashboardAnalytics, PrinterStatus } from '@/types/api';
 
 export function DashboardPage() {
   const { data: printers, isLoading, refetch, isRefetching } = useQuery<PrinterStatus[]>({
@@ -20,32 +19,75 @@ export function DashboardPage() {
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 
+  const {
+    data: analytics,
+    isLoading: isAnalyticsLoading,
+    isFetching: isAnalyticsFetching,
+  } = useQuery<DashboardAnalytics>({
+    queryKey: ['dashboard', 'analytics'],
+    queryFn: dashboardApi.getAnalytics,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+
   const stats = [
     {
       label: 'Total Printers',
       value: printers?.length || 0,
-      icon: Printer,
-      tone: 'bg-primary/10 text-primary',
     },
     {
       label: 'Online',
-      value: printers?.filter((p) => p.is_online && !p.has_redirect).length || 0,
-      icon: CheckCircle,
-      tone: 'bg-success/10 text-success',
+      value:
+        printers?.filter((p) => (p.status?.is_online ?? (p as unknown as { is_online?: boolean }).is_online) && !(p.status?.is_redirected ?? (p as unknown as { has_redirect?: boolean }).has_redirect)).length ||
+        0,
     },
     {
       label: 'Offline',
-      value: printers?.filter((p) => !p.is_online && !p.has_redirect).length || 0,
-      icon: XCircle,
-      tone: 'bg-error/10 text-error',
+      value:
+        printers?.filter((p) => !(p.status?.is_online ?? (p as unknown as { is_online?: boolean }).is_online) && !(p.status?.is_redirected ?? (p as unknown as { has_redirect?: boolean }).has_redirect)).length ||
+        0,
     },
     {
       label: 'Redirected',
-      value: printers?.filter((p) => p.has_redirect).length || 0,
-      icon: ArrowRightLeft,
-      tone: 'bg-warning/10 text-warning',
+      value: printers?.filter((p) => p.status?.is_redirected ?? (p as unknown as { has_redirect?: boolean }).has_redirect).length || 0,
     },
   ];
+
+  const modelCounts = printers?.reduce<Record<string, number>>((acc, p) => {
+    const model = p.printer.model || 'Unknown';
+    acc[model] = (acc[model] || 0) + 1;
+    return acc;
+  }, {}) ?? {};
+
+  const modelBarData = Object.entries(modelCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([model, count]) => ({ model, count }));
+
+
+  const pagesByPrinterData = analytics?.top_pages?.map((row) => ({
+    name: row.name,
+    pages: row.total_pages,
+    uptime: row.uptime_hours ?? 0,
+  })) ?? [];
+
+  // Create uptime data sorted by uptime for better visualization
+  const uptimeData = [...pagesByPrinterData]
+    .filter(row => row.uptime > 0)
+    .sort((a, b) => b.uptime - a.uptime);
+
+  const hasPagesByPrinter = pagesByPrinterData.length > 0 && pagesByPrinterData.some((row) => row.pages > 0);
+  const hasUptime = uptimeData.length > 0;
+
+  const atRiskPrinters = printers
+    ?.filter((p) => {
+      const isOnline = p.status?.is_online ?? (p as unknown as { is_online?: boolean }).is_online ?? false;
+      const tcp = p.status?.tcp_reachable ?? (p as unknown as { tcp_reachable?: boolean }).tcp_reachable ?? false;
+      return !isOnline || !tcp;
+    })
+    .slice(0, 5);
 
   if (isLoading) {
     return (
@@ -158,11 +200,8 @@ export function DashboardPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {stats.map((stat) => (
               <Card key={stat.label} className="shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardHeader className="pb-2">
                   <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.tone}`}>
-                    <stat.icon className="h-5 w-5" />
-                  </div>
                 </CardHeader>
                 <CardContent>
                   <p className="text-3xl font-semibold">{stat.value}</p>
@@ -171,11 +210,185 @@ export function DashboardPage() {
             ))}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {printers?.map((printerStatus) => (
-              <PrinterCard key={printerStatus.printer.id} printerStatus={printerStatus} />
-            ))}
+          {/* Charts Row - 3 columns */}
+          <div className="grid gap-4 md:grid-cols-3">
+            {/* Total Pages by Printer */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Total Pages by Printer</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isAnalyticsLoading || isAnalyticsFetching ? (
+                  <div className="flex h-[220px] items-center justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : hasPagesByPrinter ? (
+                  <ChartContainer
+                    config={{
+                      pages: { label: 'Total Pages', color: 'hsl(var(--chart-1))' },
+                    }}
+                    className="h-[220px] w-full"
+                  >
+                    <BarChart
+                      accessibilityLayer
+                      data={pagesByPrinterData.slice(0, 15)}
+                      margin={{ left: 0, right: 0, top: 4, bottom: 4 }}
+                      barCategoryGap={0}
+                    >
+                      <ChartTooltip
+                        cursor={false}
+                        content={
+                          <ChartTooltipContent
+                            labelFormatter={(_, payload) => payload?.[0]?.payload?.name || ''}
+                          />
+                        }
+                      />
+                      <Bar dataKey="pages" fill="var(--color-pages)" radius={[3, 3, 0, 0]} minPointSize={4} />
+                    </BarChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
+                    No page data yet
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Top Printer Models */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Top Models</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {modelBarData.length > 0 ? (
+                  <ChartContainer
+                    config={{
+                      count: { label: 'Count', color: 'hsl(var(--chart-2))' },
+                    }}
+                    className="h-[220px] w-full"
+                  >
+                    <BarChart
+                      accessibilityLayer
+                      data={modelBarData.slice(0, 15)}
+                      margin={{ left: 0, right: 0, top: 4, bottom: 4 }}
+                      barCategoryGap={0}
+                    >
+                      <ChartTooltip
+                        cursor={false}
+                        content={
+                          <ChartTooltipContent
+                            labelFormatter={(_, payload) => payload?.[0]?.payload?.model || ''}
+                          />
+                        }
+                      />
+                      <Bar dataKey="count" fill="var(--color-count)" radius={[3, 3, 0, 0]} minPointSize={4} />
+                    </BarChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
+                    No model data
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Uptime Leaders */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Uptime Leaders</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {hasUptime ? (
+                  <ChartContainer
+                    config={{
+                      uptime: { label: 'Uptime (hours)', color: 'hsl(var(--chart-3))' },
+                    }}
+                    className="h-[220px] w-full"
+                  >
+                    <BarChart
+                      accessibilityLayer
+                      data={uptimeData.slice(0, 15)}
+                      margin={{ left: 0, right: 0, top: 4, bottom: 4 }}
+                      barCategoryGap={0}
+                    >
+                      <ChartTooltip
+                        cursor={false}
+                        content={
+                          <ChartTooltipContent
+                            labelFormatter={(_, payload) => payload?.[0]?.payload?.name || ''}
+                          />
+                        }
+                      />
+                      <Bar dataKey="uptime" fill="var(--color-uptime)" radius={[3, 3, 0, 0]} minPointSize={4} />
+                    </BarChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
+                    No uptime data
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
+
+          {/* At-Risk and Quick Actions row */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* At-Risk Printers */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>At-Risk Printers</CardTitle>
+                {!atRiskPrinters?.length && (
+                  <CardDescription>No printers currently at risk.</CardDescription>
+                )}
+              </CardHeader>
+              <CardContent className="flex h-full flex-col gap-2">
+                {atRiskPrinters?.length ? (
+                  <div className="space-y-2">
+                    {atRiskPrinters.slice(0, 3).map((item) => (
+                      <div key={item.printer.id} className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{item.printer.name}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex-1" />
+                )}
+                <Link to="/printers" className="mt-auto text-xs text-primary hover:underline">
+                  View all printers
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Quick Actions */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-1.5">
+                <Button variant="outline" size="sm" className="justify-start gap-2 h-8" asChild>
+                  <Link to="/printers?add=1">
+                    <Plus className="h-3.5 w-3.5" />
+                    Add printer
+                  </Link>
+                </Button>
+                <Button variant="outline" size="sm" className="justify-start gap-2 h-8" asChild>
+                  <Link to="/printers">
+                    <Printer className="h-3.5 w-3.5" />
+                    View printers
+                  </Link>
+                </Button>
+                <Button variant="outline" size="sm" className="justify-start gap-2 h-8" asChild>
+                  <Link to="/redirects">
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Redirects
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
         </>
       )}
     </div>

@@ -9,12 +9,15 @@ interface PrinterCardProps {
 }
 
 export function PrinterCard({ printerStatus }: PrinterCardProps) {
-  const { printer, is_online, has_redirect, is_target, redirect_target, redirect_source } = printerStatus;
+  const { printer, status, redirect_target, redirect_source } = printerStatus;
+  const isOnline = status?.is_online ?? (printerStatus as unknown as { is_online?: boolean }).is_online ?? false;
+  const hasRedirect = status?.is_redirected ?? (printerStatus as unknown as { has_redirect?: boolean }).has_redirect ?? false;
+  const isTarget = status?.is_redirect_target ?? (printerStatus as unknown as { is_target?: boolean }).is_target ?? false;
 
   const getStatus = () => {
-    if (has_redirect) return 'redirected';
-    if (is_target) return 'target';
-    if (is_online) return 'online';
+    if (hasRedirect) return 'redirected';
+    if (isTarget) return 'target';
+    if (isOnline) return 'online';
     return 'offline';
   };
 
@@ -41,7 +44,7 @@ export function PrinterCard({ printerStatus }: PrinterCardProps) {
             </div>
           )}
 
-          {has_redirect && redirect_target && (
+          {hasRedirect && redirect_target && (
             <div className="flex items-center gap-2 rounded-lg bg-warning-bg/60 p-3 text-sm">
               <ArrowRight className="h-4 w-4 text-warning" />
               <span>
@@ -50,7 +53,7 @@ export function PrinterCard({ printerStatus }: PrinterCardProps) {
             </div>
           )}
 
-          {is_target && redirect_source && (
+          {isTarget && redirect_source && (
             <div className="flex items-center gap-2 rounded-lg bg-info-bg/60 p-3 text-sm">
               <ArrowRight className="h-4 w-4 text-info rotate-180" />
               <span>

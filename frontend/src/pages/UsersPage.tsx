@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersApi } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Pencil, Trash2 } from 'lucide-react';
 import type { User } from '@/types/api';
 
 export function UsersPage() {
@@ -258,10 +258,7 @@ export function UsersPage() {
       </Dialog>
 
       {/* Users table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">All Users</CardTitle>
-        </CardHeader>
+      <Card className="gap-0 py-0">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -304,17 +301,24 @@ export function UsersPage() {
                   </TableCell>
                   <TableCell className="px-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => openEditModal(user)}>
-                        Edit
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Edit ${user.username}`}
+                        onClick={() => openEditModal(user)}
+                      >
+                        <Pencil className="h-4 w-4" />
                       </Button>
                       {user.id !== currentUser?.id && (
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="icon"
+                          aria-label={`Delete ${user.username}`}
                           onClick={() => handleDelete(user.id, user.username)}
                           disabled={deleteMutation.isPending}
+                          className="delete-action"
                         >
-                          Delete
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       )}
                     </div>

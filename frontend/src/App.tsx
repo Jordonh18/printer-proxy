@@ -10,6 +10,7 @@ import { PrinterDetailPage } from '@/pages/PrinterDetailPage';
 import { RedirectsPage } from '@/pages/RedirectsPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { AuditLogPage } from '@/pages/AuditLogPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -62,6 +63,14 @@ function App() {
                 element={
                   <ProtectedRoute requiredRoles={['admin']}>
                     <SettingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/audit-logs"
+                element={
+                  <ProtectedRoute requiredRoles={['admin']}>
+                    <AuditLogPage />
                   </ProtectedRoute>
                 }
               />

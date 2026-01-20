@@ -33,6 +33,11 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl = (originalRequest?.url || '').toString();
+
+    if (requestUrl.includes('/auth/login') || requestUrl.includes('/auth/refresh')) {
+      return Promise.reject(error);
+    }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
@@ -69,8 +74,14 @@ api.interceptors.response.use(
 
 // Auth API
 export const authApi = {
-  login: async (username: string, password: string): Promise<AuthResponse> => {
-    const response = await api.post<AuthResponse>('/auth/login', { username, password });
+  login: async (username: string, password: string, options?: { totp?: string; recovery_code?: string }): Promise<AuthResponse> => {
+    const payload: { username: string; password: string; totp?: string; recovery_code?: string } = {
+      username,
+      password,
+    };
+    if (options?.totp) payload.totp = options.totp;
+    if (options?.recovery_code) payload.recovery_code = options.recovery_code;
+    const response = await api.post<AuthResponse>('/auth/login', payload);
     return response.data;
   },
 
@@ -82,6 +93,50 @@ export const authApi = {
 
   me: async (): Promise<User> => {
     const response = await api.get<User>('/auth/me');
+    return response.data;
+  },
+
+  updateMe: async (data: {
+    username: string;
+    email?: string | null;
+    theme?: string;
+    language?: string;
+    timezone?: string;
+  }): Promise<User> => {
+    const response = await api.put<User>('/auth/me', data);
+    return response.data;
+  },
+
+  setupMfa: async (): Promise<{ otpauth_uri: string; issuer: string; account: string }> => {
+    const response = await api.post('/auth/mfa/setup');
+    return response.data;
+  },
+
+  verifyMfa: async (code: string): Promise<{ recovery_codes: string[] }> => {
+    const response = await api.post('/auth/mfa/verify', { code });
+    return response.data;
+  },
+
+  disableMfa: async (data: { password?: string; code?: string }): Promise<{ message: string }> => {
+    const response = await api.post('/auth/mfa/disable', data);
+    return response.data;
+  },
+
+  getSessions: async (): Promise<Array<{
+    id: number;
+    created_at: string | null;
+    last_used: string | null;
+    revoked_at: string | null;
+    ip_address: string | null;
+    user_agent: string | null;
+    is_current: boolean;
+  }>> => {
+    const response = await api.get('/auth/sessions');
+    return response.data;
+  },
+
+  revokeSession: async (id: number): Promise<{ message: string }> => {
+    const response = await api.post(`/auth/sessions/${id}/revoke`);
     return response.data;
   },
 };
@@ -131,6 +186,26 @@ export const printersApi = {
     return response.data;
   },
 
+  getQueue: async (id: string) => {
+    const response = await api.get(`/printers/${id}/queue`);
+    return response.data;
+  },
+
+  getJobHistory: async (id: string) => {
+    const response = await api.get(`/printers/${id}/jobs`);
+    return response.data;
+  },
+
+  getLogs: async (id: string) => {
+    const response = await api.get(`/printers/${id}/logs`);
+    return response.data;
+  },
+
+  getAudit: async (id: string) => {
+    const response = await api.get(`/printers/${id}/audit`);
+    return response.data;
+  },
+
   getHealth: async (id: string) => {
     const response = await api.get(`/printers/${id}/health`);
     return response.data;
@@ -146,6 +221,10 @@ export const printersApi = {
 export const dashboardApi = {
   getStatus: async () => {
     const response = await api.get('/dashboard/status');
+    return response.data;
+  },
+  getAnalytics: async () => {
+    const response = await api.get('/dashboard/analytics');
     return response.data;
   },
 };
@@ -255,8 +334,8 @@ export const settingsApi = {
     return response.data;
   },
 
-  testSmtp: async () => {
-    const response = await api.post('/settings/notifications/smtp/test');
+  testSmtp: async (settings: Partial<SmtpSettings>) => {
+    const response = await api.post('/settings/notifications/smtp/test', settings);
     return response.data;
   },
 };

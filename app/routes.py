@@ -6,13 +6,19 @@ from uuid import uuid4
 from flask import Blueprint, request, jsonify, g, current_app
 from flask_jwt_extended import (
     verify_jwt_in_request, get_jwt_identity, get_jwt,
-    create_access_token, create_refresh_token, jwt_required
+    create_access_token, create_refresh_token, jwt_required, decode_token
 )
 from flask_jwt_extended.exceptions import JWTExtendedException
 
-from app.models import AuditLog, ActiveRedirect, User
-from app.auth import authenticate_user, validate_password_strength, hash_password
+from app.models import AuditLog, ActiveRedirect, User, UserSession, get_db_connection
+from app.auth import authenticate_user, validate_password_strength, hash_password, verify_password
 from app.printers import get_registry, Printer
+from app.printer_stats import get_printer_stats
+import time
+import secrets
+import json
+import pyotp
+import bcrypt
 from app.network import get_network_manager
 from app.discovery import get_discovery
 from config.config import (
@@ -38,6 +44,31 @@ def _serialize_timestamp(value):
     return str(value)
 
 
+def _load_recovery_codes(user: User) -> list:
+    if not user.mfa_recovery_codes:
+        return []
+    try:
+        return json.loads(user.mfa_recovery_codes)
+    except Exception:
+        return []
+
+
+def _consume_recovery_code(user: User, code: str) -> bool:
+    codes = _load_recovery_codes(user)
+    if not codes:
+        return False
+    remaining = []
+    matched = False
+    for hashed in codes:
+        if not matched and bcrypt.checkpw(code.encode('utf-8'), hashed.encode('utf-8')):
+            matched = True
+            continue
+        remaining.append(hashed)
+    if matched:
+        user.set_recovery_codes(json.dumps(remaining))
+    return matched
+
+
 # ============================================================================
 # API Authentication Helpers
 # ============================================================================
@@ -49,10 +80,19 @@ def api_auth_required(fn):
         try:
             verify_jwt_in_request()
             user_id = get_jwt_identity()
+            claims = get_jwt()
             user = User.get_by_id(int(user_id)) if user_id is not None else None
             if user and user.is_active:
+                jti = claims.get('jti')
+                if not jti:
+                    return jsonify({'error': 'Invalid token'}), 401
+                session = UserSession.get_by_jti(jti)
+                if not session or session.revoked_at:
+                    return jsonify({'error': 'Session revoked'}), 401
+                UserSession.touch(jti)
                 g.api_user = user
-                g.api_claims = get_jwt()
+                g.api_claims = claims
+                g.api_session = session
                 return fn(*args, **kwargs)
         except JWTExtendedException as exc:
             auth_present = bool(request.headers.get('Authorization'))
@@ -96,6 +136,8 @@ def api_auth_login():
     
     username = data.get('username', '').strip()
     password = data.get('password', '')
+    totp_code = data.get('totp')
+    recovery_code = data.get('recovery_code')
     
     if not username or not password:
         return jsonify({'error': 'Username and password are required'}), 400
@@ -105,6 +147,19 @@ def api_auth_login():
     
     if user is None:
         return jsonify({'error': error}), 401
+
+    if user.mfa_enabled:
+        if not totp_code and not recovery_code:
+            return jsonify({'error': 'MFA required', 'code': 'MFA_REQUIRED'}), 401
+        if recovery_code:
+            if not _consume_recovery_code(user, str(recovery_code).strip()):
+                return jsonify({'error': 'Invalid recovery code'}), 401
+        else:
+            if not user.mfa_secret:
+                return jsonify({'error': 'MFA not configured'}), 400
+            totp = pyotp.TOTP(user.mfa_secret)
+            if not totp.verify(str(totp_code).strip(), valid_window=1):
+                return jsonify({'error': 'Invalid verification code'}), 401
     
     access_token = create_access_token(
         identity=str(user.id),
@@ -114,6 +169,13 @@ def api_auth_login():
         }
     )
     refresh_token = create_refresh_token(identity=str(user.id))
+
+    decoded = decode_token(access_token)
+    jti = decoded.get('jti')
+    ip_address = request.remote_addr
+    user_agent = request.headers.get('User-Agent')
+    if jti:
+        UserSession.create(user.id, jti, ip_address, user_agent)
     
     return jsonify({
         'access_token': access_token,
@@ -121,7 +183,12 @@ def api_auth_login():
         'user': {
             'id': user.id,
             'username': user.username,
-            'role': user.role
+            'email': getattr(user, 'email', None),
+            'role': user.role,
+            'mfa_enabled': bool(user.mfa_enabled),
+            'theme': user.theme,
+            'language': user.language,
+            'timezone': user.timezone
         }
     })
 
@@ -143,31 +210,223 @@ def api_auth_refresh():
             'role': user.role
         }
     )
+    decoded = decode_token(access_token)
+    jti = decoded.get('jti')
+    ip_address = request.remote_addr
+    user_agent = request.headers.get('User-Agent')
+    if jti:
+        UserSession.create(user.id, jti, ip_address, user_agent)
+
     return jsonify({'access_token': access_token})
 
 
 @api_bp.route('/auth/me')
-@jwt_required()
+@api_auth_required
 def api_auth_me():
     """Get current user info from JWT token."""
-    user_id = get_jwt_identity()
-    user = User.get_by_id(int(user_id)) if user_id is not None else None
-    
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    
+    user = g.api_user
     return jsonify({
         'id': user.id,
         'username': user.username,
+        'email': getattr(user, 'email', None),
         'role': user.role,
         'is_active': user.is_active,
-        'last_login': _serialize_timestamp(user.last_login)
+        'last_login': _serialize_timestamp(user.last_login),
+        'mfa_enabled': bool(user.mfa_enabled),
+        'theme': user.theme,
+        'language': user.language,
+        'timezone': user.timezone,
+        'current_session_id': g.api_session.id if getattr(g, 'api_session', None) else None
     })
 
 
+@api_bp.route('/auth/me', methods=['PUT'])
+@api_auth_required
+def api_auth_me_update():
+    """Update current user's profile."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+
+    user = g.api_user
+    new_username = data.get('username', '').strip()
+    new_email = data.get('email', None)
+    theme = data.get('theme', user.theme)
+    language = data.get('language', user.language)
+    timezone = data.get('timezone', user.timezone)
+
+    if theme not in ['system', 'light', 'dark']:
+        return jsonify({'error': 'Invalid theme'}), 400
+
+    if language not in ['en', 'es', 'fr']:
+        return jsonify({'error': 'Invalid language'}), 400
+
+    if isinstance(new_email, str):
+        new_email = new_email.strip()
+    if new_email == '':
+        new_email = None
+
+    if not new_username:
+        return jsonify({'error': 'Username is required'}), 400
+
+    existing = User.get_by_username(new_username)
+    if existing and existing.id != user.id:
+        return jsonify({'error': 'Username already exists'}), 400
+
+    if new_email:
+        existing_email = User.get_by_email(new_email)
+        if existing_email and existing_email.id != user.id:
+            return jsonify({'error': 'Email already in use'}), 400
+
+    user.update_profile(new_username, new_email)
+    user.update_preferences(theme, language, timezone)
+
+    AuditLog.log(
+        username=user.username,
+        action='USER_PROFILE_UPDATED',
+        details='Updated account settings',
+        success=True
+    )
+
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'email': getattr(user, 'email', None),
+        'role': user.role,
+        'is_active': user.is_active,
+        'last_login': _serialize_timestamp(user.last_login),
+        'mfa_enabled': bool(user.mfa_enabled),
+        'theme': user.theme,
+        'language': user.language,
+        'timezone': user.timezone
+    })
+
+
+@api_bp.route('/auth/mfa/setup', methods=['POST'])
+@api_auth_required
+def api_auth_mfa_setup():
+    """Initialize MFA setup and return otpauth URI."""
+    user = g.api_user
+    secret = pyotp.random_base32()
+    user.set_mfa_secret(secret)
+    user.set_mfa_enabled(False)
+    user.set_recovery_codes(None)
+    issuer = 'Printer Proxy'
+    otpauth_uri = pyotp.TOTP(secret).provisioning_uri(name=user.username, issuer_name=issuer)
+    return jsonify({
+        'otpauth_uri': otpauth_uri,
+        'issuer': issuer,
+        'account': user.username
+    })
+
+
+@api_bp.route('/auth/mfa/verify', methods=['POST'])
+@api_auth_required
+def api_auth_mfa_verify():
+    """Verify MFA setup and generate recovery codes."""
+    user = g.api_user
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    code = str(data.get('code', '')).strip()
+    if not user.mfa_secret:
+        return jsonify({'error': 'MFA not initialized'}), 400
+    totp = pyotp.TOTP(user.mfa_secret)
+    if not totp.verify(code, valid_window=1):
+        return jsonify({'error': 'Invalid verification code'}), 400
+
+    recovery_codes = [secrets.token_hex(4) for _ in range(10)]
+    hashed_codes = [bcrypt.hashpw(code.encode('utf-8'), bcrypt.gensalt()).decode('utf-8') for code in recovery_codes]
+    user.set_recovery_codes(json.dumps(hashed_codes))
+    user.set_mfa_enabled(True)
+
+    AuditLog.log(
+        username=user.username,
+        action='MFA_ENABLED',
+        details='MFA enabled with recovery codes',
+        success=True
+    )
+
+    return jsonify({
+        'recovery_codes': recovery_codes
+    })
+
+
+@api_bp.route('/auth/mfa/disable', methods=['POST'])
+@api_auth_required
+def api_auth_mfa_disable():
+    """Disable MFA for current user (requires password or code)."""
+    user = g.api_user
+    data = request.get_json() or {}
+    password = data.get('password')
+    code = data.get('code')
+
+    if not password and not code:
+        return jsonify({'error': 'Password or code required'}), 400
+
+    if password and not verify_password(password, user.password_hash):
+        return jsonify({'error': 'Invalid password'}), 400
+
+    if code and user.mfa_secret:
+        totp = pyotp.TOTP(user.mfa_secret)
+        if not totp.verify(str(code).strip(), valid_window=1):
+            return jsonify({'error': 'Invalid verification code'}), 400
+
+    user.set_mfa_enabled(False)
+    user.set_mfa_secret(None)
+    user.set_recovery_codes(None)
+
+    AuditLog.log(
+        username=user.username,
+        action='MFA_DISABLED',
+        details='MFA disabled',
+        success=True
+    )
+
+    return jsonify({'message': 'MFA disabled'})
+
+
+@api_bp.route('/auth/sessions')
+@api_auth_required
+def api_auth_sessions():
+    """List active sessions for current user."""
+    user = g.api_user
+    sessions = UserSession.get_by_user(user.id)
+    current_jti = g.api_claims.get('jti')
+    return jsonify([
+        {
+            'id': s.id,
+            'created_at': _serialize_timestamp(s.created_at),
+            'last_used': _serialize_timestamp(s.last_used),
+            'revoked_at': _serialize_timestamp(s.revoked_at),
+            'ip_address': s.ip_address,
+            'user_agent': s.user_agent,
+            'is_current': s.jti == current_jti
+        }
+        for s in sessions
+    ])
+
+
+@api_bp.route('/auth/sessions/<int:session_id>/revoke', methods=['POST'])
+@api_auth_required
+def api_auth_sessions_revoke(session_id: int):
+    """Revoke a session by ID."""
+    user = g.api_user
+    sessions = UserSession.get_by_user(user.id)
+    session_ids = {s.id for s in sessions}
+    if session_id not in session_ids:
+        return jsonify({'error': 'Session not found'}), 404
+    UserSession.revoke(session_id)
+    return jsonify({'message': 'Session revoked'})
+
+
 @api_bp.route('/auth/logout', methods=['POST'])
+@api_auth_required
 def api_auth_logout():
-    """Logout endpoint (client should discard tokens)."""
+    """Logout endpoint (revokes current session)."""
+    jti = g.api_claims.get('jti')
+    if jti:
+        UserSession.revoke_by_jti(jti)
     return jsonify({'message': 'Successfully logged out'})
 
 
@@ -306,6 +565,8 @@ def api_printer_create():
         AuditLog.log(
             username=g.api_user.username,
             action='PRINTER_CREATED',
+            source_printer_id=printer.id,
+            source_ip=printer.ip,
             details=f"Created printer '{name}' ({ip})",
             success=True
         )
@@ -380,6 +641,8 @@ def api_printer_update(printer_id):
         AuditLog.log(
             username=g.api_user.username,
             action='PRINTER_UPDATED',
+            source_printer_id=printer.id,
+            source_ip=printer.ip,
             details=f"Updated printer '{name}' ({ip})",
             success=True
         )
@@ -416,11 +679,15 @@ def api_printer_delete(printer_id):
         return jsonify({'error': 'Cannot delete printer that is a redirect target'}), 400
     
     try:
-        registry.delete(printer_id)
+        success = registry.delete_printer(printer_id)
+        if not success:
+            return jsonify({'error': 'Failed to delete printer'}), 500
         
         AuditLog.log(
             username=g.api_user.username,
             action='PRINTER_DELETED',
+            source_printer_id=printer.id,
+            source_ip=printer.ip,
             details=f"Deleted printer '{printer.name}' ({printer.ip})",
             success=True
         )
@@ -511,6 +778,60 @@ def api_printer_refresh(printer_id):
         'is_online': result.is_online,
         'response_time_ms': result.response_time_ms
     })
+
+
+@api_bp.route('/printers/<printer_id>/queue')
+@api_auth_required
+def api_printer_queue(printer_id):
+    """Get current print queue for a printer."""
+    from app.print_queue import get_print_queue
+
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+
+    jobs = get_print_queue(printer.ip)
+    return jsonify({'jobs': [job.to_dict() for job in jobs]})
+
+
+@api_bp.route('/printers/<printer_id>/jobs')
+@api_auth_required
+def api_printer_job_history(printer_id):
+    """Get print job history for a printer."""
+    from app.models import PrintJobHistory
+
+    limit = int(request.args.get('limit', 50))
+    jobs = PrintJobHistory.get_for_printer(printer_id, limit=limit)
+    return jsonify({'jobs': [job.to_dict() for job in jobs]})
+
+
+@api_bp.route('/printers/<printer_id>/logs')
+@api_auth_required
+def api_printer_logs(printer_id):
+    """Get device event logs for a printer."""
+    from app.event_logs import get_printer_logs
+
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+
+    events = get_printer_logs(printer.ip)
+    return jsonify({'events': [event.to_dict() for event in events]})
+
+
+@api_bp.route('/printers/<printer_id>/audit')
+@api_auth_required
+def api_printer_audit(printer_id):
+    """Get audit log entries related to a printer."""
+    from app.models import AuditLog
+
+    limit = int(request.args.get('limit', 20))
+    logs = AuditLog.get_by_printer(printer_id, limit=limit)
+    return jsonify({'logs': logs})
 
 
 # ============================================================================
@@ -655,6 +976,7 @@ def api_users():
     return jsonify([{
         'id': u.id,
         'username': u.username,
+        'email': getattr(u, 'email', None),
         'role': u.role,
         'is_active': u.is_active,
         'last_login': _serialize_timestamp(u.last_login),
@@ -717,6 +1039,7 @@ def api_user_get(user_id: int):
     return jsonify({
         'id': user.id,
         'username': user.username,
+        'email': getattr(user, 'email', None),
         'role': user.role,
         'is_active': user.is_active,
         'last_login': _serialize_timestamp(user.last_login),
@@ -772,6 +1095,7 @@ def api_user_update(user_id: int):
     return jsonify({
         'id': user.id,
         'username': user.username,
+        'email': getattr(user, 'email', None),
         'role': user.role,
         'is_active': user.is_active
     })
@@ -821,15 +1145,17 @@ def api_audit_logs():
     logs = AuditLog.get_recent(limit=limit, offset=offset, action=action, username=username)
     
     return jsonify([{
-        'id': log.id,
-        'timestamp': log.timestamp.isoformat() if log.timestamp else None,
-        'username': log.username,
-        'action': log.action,
-        'details': log.details,
-        'source_printer_id': log.source_printer_id,
-        'target_printer_id': log.target_printer_id,
-        'success': log.success,
-        'error_message': log.error_message
+        'id': log.get('id'),
+        'timestamp': _serialize_timestamp(log.get('timestamp')),
+        'username': log.get('username'),
+        'action': log.get('action'),
+        'details': log.get('details'),
+        'source_printer_id': log.get('source_printer_id'),
+        'source_ip': log.get('source_ip'),
+        'target_printer_id': log.get('target_printer_id'),
+        'target_ip': log.get('target_ip'),
+        'success': log.get('success'),
+        'error_message': log.get('error_message')
     } for log in logs])
 
 
@@ -895,6 +1221,11 @@ def api_network_status():
 # Dashboard API Routes
 # ============================================================================
 
+_dashboard_analytics_cache = {
+    'timestamp': 0.0,
+    'data': None
+}
+
 @api_bp.route('/dashboard/status')
 @api_auth_required
 def api_dashboard_status():
@@ -920,6 +1251,92 @@ def api_dashboard_stats():
         'offline_printers': offline_count,
         'active_redirects': len(redirects)
     })
+
+
+@api_bp.route('/dashboard/analytics')
+@api_auth_required
+def api_dashboard_analytics():
+    """Get dashboard analytics for charts."""
+    # Cache SNMP-heavy analytics for 5 minutes
+    now = time.time()
+    cached = _dashboard_analytics_cache.get('data')
+    if cached and (now - _dashboard_analytics_cache.get('timestamp', 0)) < 300:
+        return jsonify(cached)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    registry = get_registry()
+    printers = registry.get_all()
+
+    def _parse_uptime_hours(uptime: str) -> float:
+        if not uptime:
+            return 0.0
+        days = hours = minutes = 0
+        try:
+            parts = uptime.split()
+            for part in parts:
+                if part.endswith('d'):
+                    days = int(part[:-1])
+                elif part.endswith('h'):
+                    hours = int(part[:-1])
+                elif part.endswith('m'):
+                    minutes = int(part[:-1])
+        except Exception:
+            return 0.0
+        return (days * 24) + hours + (minutes / 60.0)
+
+    # Top printers by SNMP total pages + uptime
+    snmp_pages = []
+    for printer in printers:
+        stats = get_printer_stats(printer.ip)
+        total_pages = stats.total_pages if stats and stats.total_pages is not None else 0
+        uptime_hours = _parse_uptime_hours(stats.uptime) if stats and stats.uptime else 0.0
+        snmp_pages.append({
+            'printer_id': printer.id,
+            'name': printer.name,
+            'total_pages': total_pages,
+            'uptime_hours': round(uptime_hours, 1)
+        })
+    top_pages = sorted(snmp_pages, key=lambda x: x['total_pages'], reverse=True)[:15]
+
+    # Daily job volume (last 7 days)
+    cursor.execute(
+        """
+        SELECT substr(recorded_at, 1, 10) AS day,
+               COALESCE(SUM(pages), 0) AS total_pages,
+               COUNT(*) AS total_jobs
+        FROM print_job_history
+        WHERE recorded_at >= datetime('now','-6 days')
+        GROUP BY substr(recorded_at, 1, 10)
+        ORDER BY substr(recorded_at, 1, 10)
+        """
+    )
+    daily_rows = cursor.fetchall()
+    conn.close()
+
+    # Fill missing days
+    from datetime import datetime, timedelta
+    daily_map = {row['day']: row for row in daily_rows}
+    daily = []
+    for i in range(6, -1, -1):
+        day = (datetime.utcnow() - timedelta(days=i)).date().isoformat()
+        row = daily_map.get(day)
+        daily.append({
+            'day': day,
+            'total_pages': row['total_pages'] if row else 0,
+            'total_jobs': row['total_jobs'] if row else 0
+        })
+
+    payload = {
+        'top_pages': top_pages,
+        'daily_volume': daily
+    }
+
+    _dashboard_analytics_cache['timestamp'] = now
+    _dashboard_analytics_cache['data'] = payload
+
+    return jsonify(payload)
 
 
 # ============================================================================
@@ -1033,23 +1450,63 @@ def api_settings_smtp():
 @api_role_required('admin')
 def api_settings_smtp_test():
     """Send a test email using current SMTP settings."""
-    from app.notifications import get_notification_manager
-    
-    manager = get_notification_manager()
-    success, message = manager.test_channel('smtp')
-    
+    from app.notifications import SMTPNotificationChannel
+    from app.settings import get_settings_manager
+
+    data = request.get_json() or {}
+    if data:
+        smtp_settings = {
+            'enabled': data.get('enabled', True),
+            'host': data.get('host', ''),
+            'port': data.get('port', 587),
+            'username': data.get('username', ''),
+            'password': data.get('password', ''),
+            'from_address': data.get('from_address', ''),
+            'to_addresses': data.get('to_addresses', ''),
+            'use_tls': data.get('use_tls', True),
+            'use_ssl': data.get('use_ssl', False),
+        }
+        settings = {'notifications': {'smtp': smtp_settings}}
+    else:
+        settings = get_settings_manager().get_all()
+
+    channel = SMTPNotificationChannel()
+    if not channel.is_configured(settings):
+        return jsonify({
+            'success': False,
+            'error': 'SMTP is not properly configured'
+        }), 400
+
+    success = channel.send(
+        subject="Printer Proxy - Test Notification",
+        message="This is a test notification from Printer Proxy. If you received this, your notification settings are working correctly.",
+        settings=settings,
+        html_message="""
+        <html>
+        <body style=\"font-family: Arial, sans-serif; padding: 20px;\">
+            <h2 style=\"color: #333;\">Printer Proxy - Test Notification</h2>
+            <p>This is a test notification from <strong>Printer Proxy</strong>.</p>
+            <p>If you received this, your notification settings are working correctly.</p>
+        </body>
+        </html>
+        """
+    )
+
     if success:
         AuditLog.log(
             username=g.api_user.username,
             action='SMTP_TEST',
             details='Test email sent successfully'
         )
+        return jsonify({
+            'success': True,
+            'message': 'Test email sent successfully'
+        })
     
     return jsonify({
-        'success': success,
-        'message': message if success else None,
-        'error': message if not success else None
-    })
+        'success': False,
+        'error': 'Failed to send test email'
+    }), 500
 
 
 # ============================================================================
