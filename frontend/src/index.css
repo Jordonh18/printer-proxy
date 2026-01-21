@@ -142,3 +142,50 @@
     @apply font-sans;
   }
 }
+
+.workflow-panel {
+  background: var(--card);
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  border-radius: 16px;
+  box-shadow: 0 18px 40px -28px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+}
+
+.workflow-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.workflow-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 50%, transparent) transparent;
+}
+
+.workflow-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.workflow-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.workflow-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+}
+
+.react-flow__controls button {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent) !important;
+}
+
+.react-flow__controls button:hover {
+  background: color-mix(in oklab, var(--card) 80%, var(--muted) 20%) !important;
+}
+
+.react-flow__minimap {
+  background: var(--card) !important;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent) !important;
+}

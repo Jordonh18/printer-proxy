@@ -1,5 +1,15 @@
 import axios from 'axios';
-import type { AuthResponse, User, SmtpSettings, PrinterGroup, PrinterGroupDetail } from '@/types/api';
+import type {
+  AuthResponse,
+  User,
+  SmtpSettings,
+  PrinterGroup,
+  PrinterGroupDetail,
+  Workflow,
+  WorkflowRegistryNode,
+  WorkflowEdge,
+  WorkflowNode,
+} from '@/types/api';
 
 const API_BASE = '/api';
 
@@ -263,6 +273,58 @@ export const dashboardApi = {
   },
   getAnalytics: async () => {
     const response = await api.get('/dashboard/analytics');
+    return response.data;
+  },
+};
+
+// Workflow API
+export const workflowApi = {
+  getRegistry: async (): Promise<WorkflowRegistryNode[]> => {
+    const response = await api.get('/workflow-registry');
+    return response.data;
+  },
+
+  getAll: async (): Promise<Workflow[]> => {
+    const response = await api.get('/workflows');
+    return response.data;
+  },
+
+  getById: async (id: number): Promise<Workflow> => {
+    const response = await api.get(`/workflows/${id}`);
+    return response.data;
+  },
+
+  create: async (data: { name: string; description?: string }): Promise<Workflow> => {
+    const response = await api.post('/workflows', data);
+    return response.data;
+  },
+
+  update: async (id: number, data: {
+    name?: string;
+    description?: string;
+    is_active?: boolean;
+    nodes?: WorkflowNode[];
+    edges?: WorkflowEdge[];
+    ui_state?: Record<string, unknown> | null;
+  }): Promise<Workflow> => {
+    const response = await api.put(`/workflows/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: number): Promise<{ status: string }> => {
+    const response = await api.delete(`/workflows/${id}`);
+    return response.data;
+  },
+
+  validateConnection: async (id: number, data: {
+    source_node_id: string;
+    target_node_id: string;
+    source_handle?: string | null;
+    target_handle?: string | null;
+    source_node_type?: string | null;
+    target_node_type?: string | null;
+  }): Promise<{ valid: boolean; message: string }> => {
+    const response = await api.post(`/workflows/${id}/validate-connection`, data);
     return response.data;
   },
 };

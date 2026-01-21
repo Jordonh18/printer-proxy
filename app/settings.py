@@ -27,15 +27,18 @@ DEFAULT_SETTINGS = {
             'use_tls': True,
             'use_ssl': False,
         },
-        # Future notification channels can be added here
-        # 'teams': {
-        #     'enabled': False,
-        #     'webhook_url': '',
-        # },
-        # 'slack': {
-        #     'enabled': False,
-        #     'webhook_url': '',
-        # },
+        'teams': {
+            'enabled': False,
+            'webhook_url': '',
+        },
+        'slack': {
+            'enabled': False,
+            'webhook_url': '',
+        },
+        'discord': {
+            'enabled': False,
+            'webhook_url': '',
+        },
     },
     # Future settings categories can be added here
     # 'general': {

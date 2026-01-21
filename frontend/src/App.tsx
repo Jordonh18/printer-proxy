@@ -10,6 +10,8 @@ import { PrintersPage } from '@/pages/PrintersPage';
 import { PrinterDetailPage } from '@/pages/PrinterDetailPage';
 import { RedirectsPage } from '@/pages/RedirectsPage';
 import { GroupsPage } from '@/pages/GroupsPage';
+import { WorkflowsPage } from '@/pages/WorkflowsPage';
+import { WorkflowEditorPage } from '@/pages/WorkflowEditorPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { AdminSettingsPage } from '@/pages/AdminSettingsPage';
@@ -57,6 +59,8 @@ function App() {
                 <Route path="/printers" element={<PrintersPage />} />
                 <Route path="/printers/:id" element={<PrinterDetailPage />} />
                 <Route path="/groups" element={<GroupsPage />} />
+                <Route path="/workflows" element={<WorkflowsPage />} />
+                <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route
                   path="/redirects"

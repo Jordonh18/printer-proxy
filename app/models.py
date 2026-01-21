@@ -4,7 +4,7 @@ Database models for Printer Proxy
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import json
 
 from config.config import DATABASE_PATH, DATA_DIR
@@ -409,6 +409,698 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_notifications_user_unread 
         ON notifications(user_id, is_read, created_at DESC)
     """)
+
+    # Workflow registry nodes (server-driven node catalog)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_registry_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_key TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            category TEXT NOT NULL,
+            color TEXT DEFAULT '#10b981',
+            icon TEXT DEFAULT 'Workflow',
+            inputs TEXT,
+            outputs TEXT,
+            config_schema TEXT,
+            default_properties TEXT,
+            enabled BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_workflow_registry_category
+        ON workflow_registry_nodes(category)
+    """)
+
+    # Workflows table (app-wide scope)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS workflows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            is_active BOOLEAN DEFAULT 1,
+            ui_state TEXT,
+            created_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id INTEGER NOT NULL,
+            node_id TEXT NOT NULL,
+            node_type TEXT NOT NULL,
+            label TEXT DEFAULT '',
+            position_x REAL DEFAULT 0,
+            position_y REAL DEFAULT 0,
+            properties TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(workflow_id, node_id),
+            FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id INTEGER NOT NULL,
+            source_node_id TEXT NOT NULL,
+            target_node_id TEXT NOT NULL,
+            source_handle TEXT,
+            target_handle TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_workflow_nodes_workflow
+        ON workflow_nodes(workflow_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_workflow_edges_workflow
+        ON workflow_edges(workflow_id)
+    """)
+
+    # Seed or update workflow registry defaults
+    cursor.execute("SELECT node_key FROM workflow_registry_nodes")
+    existing_keys = {row['node_key'] for row in cursor.fetchall()}
+
+    default_nodes = [
+        {
+            'node_key': 'trigger.schedule',
+            'name': 'Schedule Trigger',
+            'description': 'Start a workflow on a cron schedule.',
+            'category': 'trigger',
+            'color': '#22c55e',
+            'icon': 'CalendarClock',
+            'inputs': [],
+            'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'cron', 'label': 'Cron', 'type': 'string', 'placeholder': '0 9 * * 1-5'},
+                    {'key': 'timezone', 'label': 'Timezone', 'type': 'string', 'placeholder': 'UTC'}
+                ]
+            },
+            'default_properties': {'cron': '0 9 * * 1-5', 'timezone': 'UTC'}
+        },
+        {
+            'node_key': 'trigger.event',
+            'name': 'Event Trigger',
+            'description': 'Start when a printer or system event occurs.',
+            'category': 'trigger',
+            'color': '#22c55e',
+            'icon': 'Zap',
+            'inputs': [],
+            'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'event_type',
+                        'label': 'Event Type',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Printer Offline', 'value': 'printer_offline'},
+                            {'label': 'Printer Online', 'value': 'printer_online'},
+                            {'label': 'Job Failed', 'value': 'job_failed'},
+                            {'label': 'Job Completed', 'value': 'job_completed'},
+                            {'label': 'Redirect Activated', 'value': 'redirect_activated'}
+                        ]
+                    }
+                ]
+            },
+            'default_properties': {'event_type': 'printer_offline'}
+        },
+        {
+            'node_key': 'trigger.webhook',
+            'name': 'Webhook Trigger',
+            'description': 'Start when an incoming webhook is received.',
+            'category': 'trigger',
+            'color': '#22c55e',
+            'icon': 'Webhook',
+            'inputs': [],
+            'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'path',
+                        'label': 'Webhook Endpoint',
+                        'type': 'string',
+                        'placeholder': '/webhooks/workflows',
+                        'readOnly': True,
+                        'helperText': 'Generated automatically for this workflow trigger.'
+                    },
+                    {
+                        'key': 'secret',
+                        'label': 'Shared Secret',
+                        'type': 'string',
+                        'readOnly': True,
+                        'helperText': 'Use this secret when calling the webhook.'
+                    }
+                ]
+            },
+            'default_properties': {'path': '/webhooks/printer', 'secret': ''}
+        },
+        {
+            'node_key': 'trigger.queue_threshold',
+            'name': 'Queue Threshold',
+            'description': 'Start when a printer queue exceeds a threshold.',
+            'category': 'trigger',
+            'color': '#22c55e',
+            'icon': 'ListFilter',
+            'inputs': [],
+            'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'printer_id',
+                        'label': 'Printer',
+                        'type': 'select',
+                        'helperText': 'Choose the printer to monitor.'
+                    },
+                    {'key': 'min_jobs', 'label': 'Minimum Jobs', 'type': 'number'}
+                ]
+            },
+            'default_properties': {'printer_id': '', 'min_jobs': 5}
+        },
+        {
+            'node_key': 'trigger.health_change',
+            'name': 'Health Change',
+            'description': 'Start when a printer health state changes.',
+            'category': 'trigger',
+            'color': '#22c55e',
+            'icon': 'Activity',
+            'inputs': [],
+            'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'printer_id',
+                        'label': 'Printer',
+                        'type': 'select',
+                        'helperText': 'Choose the printer to evaluate.'
+                    },
+                    {
+                        'key': 'state',
+                        'label': 'State',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Offline', 'value': 'offline'},
+                            {'label': 'Online', 'value': 'online'}
+                        ]
+                    }
+                ]
+            },
+            'default_properties': {'printer_id': '', 'state': 'offline'}
+        },
+        {
+            'node_key': 'action.print',
+            'name': 'Print Job',
+            'description': 'Send a document to a printer.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'Printer',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'printer_id',
+                        'label': 'Printer',
+                        'type': 'select',
+                        'helperText': 'Choose the printer to print to.'
+                    },
+                    {'key': 'document_path', 'label': 'Document Path', 'type': 'string'},
+                    {'key': 'copies', 'label': 'Copies', 'type': 'number'}
+                ]
+            },
+            'default_properties': {'printer_id': '', 'document_path': '', 'copies': 1}
+        },
+        {
+            'node_key': 'action.redirect',
+            'name': 'Activate Redirect',
+            'description': 'Create or update a printer redirect.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'ArrowRightLeft',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'source_printer_id',
+                        'label': 'Source Printer',
+                        'type': 'select',
+                        'helperText': 'Select the printer receiving jobs.'
+                    },
+                    {
+                        'key': 'target_printer_id',
+                        'label': 'Target Printer',
+                        'type': 'select',
+                        'helperText': 'Select the printer to redirect to.'
+                    },
+                    {'key': 'port', 'label': 'Port', 'type': 'number'}
+                ]
+            },
+            'default_properties': {'source_printer_id': '', 'target_printer_id': '', 'port': 9100}
+        },
+        {
+            'node_key': 'action.redirect.disable',
+            'name': 'Deactivate Redirect',
+            'description': 'Disable an active redirect for a printer.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'ArrowRightLeft',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'source_printer_id',
+                        'label': 'Source Printer',
+                        'type': 'select',
+                        'helperText': 'Select the printer with an active redirect.'
+                    }
+                ]
+            },
+            'default_properties': {'source_printer_id': ''}
+        },
+        {
+            'node_key': 'action.queue.pause',
+            'name': 'Pause Print Queue',
+            'description': 'Pause all jobs for a printer queue.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'PauseCircle',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'printer_id',
+                        'label': 'Printer',
+                        'type': 'select',
+                        'helperText': 'Choose the queue to pause.'
+                    }
+                ]
+            },
+            'default_properties': {'printer_id': ''}
+        },
+        {
+            'node_key': 'action.queue.resume',
+            'name': 'Resume Print Queue',
+            'description': 'Resume processing for a printer queue.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'PlayCircle',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'printer_id',
+                        'label': 'Printer',
+                        'type': 'select',
+                        'helperText': 'Choose the queue to resume.'
+                    }
+                ]
+            },
+            'default_properties': {'printer_id': ''}
+        },
+        {
+            'node_key': 'action.queue.clear',
+            'name': 'Clear Print Queue',
+            'description': 'Delete all pending jobs for a printer.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'Trash2',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'printer_id',
+                        'label': 'Printer',
+                        'type': 'select',
+                        'helperText': 'Choose the queue to clear.'
+                    }
+                ]
+            },
+            'default_properties': {'printer_id': ''}
+        },
+        {
+            'node_key': 'action.notify.email',
+            'name': 'Send Email',
+            'description': 'Send an email notification.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'Mail',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'to', 'label': 'To', 'type': 'string'},
+                    {'key': 'subject', 'label': 'Subject', 'type': 'string'},
+                    {'key': 'body', 'label': 'Body', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'to': '', 'subject': '', 'body': ''}
+        },
+        {
+            'node_key': 'action.notify.inapp',
+            'name': 'In-App Notification',
+            'description': 'Create an in-app notification for users.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'Bell',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'title', 'label': 'Title', 'type': 'string'},
+                    {'key': 'message', 'label': 'Message', 'type': 'string'},
+                    {'key': 'link', 'label': 'Link', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'title': '', 'message': '', 'link': ''}
+        },
+        {
+            'node_key': 'action.audit',
+            'name': 'Audit Log Entry',
+            'description': 'Record a workflow action to the audit log.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'ClipboardList',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'action', 'label': 'Action', 'type': 'string'},
+                    {'key': 'details', 'label': 'Details', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'action': 'WORKFLOW_ACTION', 'details': ''}
+        },
+        {
+            'node_key': 'action.printer.note',
+            'name': 'Update Printer Notes',
+            'description': 'Append a note to a printer record.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'StickyNote',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'printer_id',
+                        'label': 'Printer',
+                        'type': 'select',
+                        'helperText': 'Choose the printer to update.'
+                    },
+                    {'key': 'note', 'label': 'Note', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'printer_id': '', 'note': ''}
+        },
+        {
+            'node_key': 'action.end',
+            'name': 'End Workflow',
+            'description': 'Stop processing this workflow branch.',
+            'category': 'action',
+            'color': '#38bdf8',
+            'icon': 'StopCircle',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [],
+            'config_schema': None,
+            'default_properties': {}
+        },
+        {
+            'node_key': 'transform.filter',
+            'name': 'Filter',
+            'description': 'Filter items by condition.',
+            'category': 'transform',
+            'color': '#a855f7',
+            'icon': 'Filter',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'data'}],
+            'outputs': [{'id': 'out', 'label': 'Out', 'type': 'data'}],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'expression',
+                        'label': 'Filter Condition',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Printer Offline', 'value': 'printer_offline'},
+                            {'label': 'Printer Online', 'value': 'printer_online'},
+                            {'label': 'Queue High', 'value': 'queue_high'},
+                            {'label': 'Queue Empty', 'value': 'queue_empty'},
+                            {'label': 'Redirect Active', 'value': 'redirect_active'},
+                            {'label': 'Redirect Inactive', 'value': 'redirect_inactive'},
+                            {'label': 'Job Failed', 'value': 'job_failed'}
+                        ],
+                        'helperText': 'Select a built-in condition to filter data.'
+                    }
+                ]
+            },
+            'default_properties': {'expression': 'printer_offline'}
+        },
+        {
+            'node_key': 'transform.map_fields',
+            'name': 'Map Fields',
+            'description': 'Map incoming data fields to new keys.',
+            'category': 'transform',
+            'color': '#a855f7',
+            'icon': 'Shuffle',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'data'}],
+            'outputs': [{'id': 'out', 'label': 'Out', 'type': 'data'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'mappings', 'label': 'Mappings (JSON)', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'mappings': '{"source":"target"}'}
+        },
+        {
+            'node_key': 'transform.template',
+            'name': 'Template',
+            'description': 'Render a text template from data.',
+            'category': 'transform',
+            'color': '#a855f7',
+            'icon': 'Type',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'data'}],
+            'outputs': [{'id': 'out', 'label': 'Out', 'type': 'data'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'template', 'label': 'Template', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'template': 'Printer {{printer_id}} is offline.'}
+        },
+        {
+            'node_key': 'logic.if',
+            'name': 'If / Else',
+            'description': 'Branch based on a condition.',
+            'category': 'conditional',
+            'color': '#f97316',
+            'icon': 'Split',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [
+                {'id': 'true', 'label': 'True', 'type': 'flow'},
+                {'id': 'false', 'label': 'False', 'type': 'flow'}
+            ],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'expression',
+                        'label': 'Condition',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Printer Offline', 'value': 'printer_offline'},
+                            {'label': 'Printer Online', 'value': 'printer_online'},
+                            {'label': 'Queue High', 'value': 'queue_high'},
+                            {'label': 'Queue Empty', 'value': 'queue_empty'},
+                            {'label': 'Redirect Active', 'value': 'redirect_active'},
+                            {'label': 'Redirect Inactive', 'value': 'redirect_inactive'},
+                            {'label': 'Job Failed', 'value': 'job_failed'}
+                        ],
+                        'helperText': 'Select a built-in condition for this branch.'
+                    }
+                ]
+            },
+            'default_properties': {'expression': 'printer_offline'}
+        },
+        {
+            'node_key': 'logic.switch',
+            'name': 'Switch',
+            'description': 'Route flow based on matching cases.',
+            'category': 'conditional',
+            'color': '#f97316',
+            'icon': 'SwitchCamera',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [
+                {'id': 'case1', 'label': 'Case 1', 'type': 'flow'},
+                {'id': 'case2', 'label': 'Case 2', 'type': 'flow'},
+                {'id': 'default', 'label': 'Default', 'type': 'flow'}
+            ],
+            'config_schema': {
+                'fields': [
+                    {
+                        'key': 'value',
+                        'label': 'Switch On',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Printer State', 'value': 'printer_state'},
+                            {'label': 'Queue State', 'value': 'queue_state'},
+                            {'label': 'Redirect State', 'value': 'redirect_state'}
+                        ]
+                    },
+                    {
+                        'key': 'case1',
+                        'label': 'Case 1',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Online', 'value': 'online'},
+                            {'label': 'Offline', 'value': 'offline'},
+                            {'label': 'High Queue', 'value': 'queue_high'},
+                            {'label': 'Queue Empty', 'value': 'queue_empty'},
+                            {'label': 'Redirect Active', 'value': 'redirect_active'},
+                            {'label': 'Redirect Inactive', 'value': 'redirect_inactive'}
+                        ]
+                    },
+                    {
+                        'key': 'case2',
+                        'label': 'Case 2',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Online', 'value': 'online'},
+                            {'label': 'Offline', 'value': 'offline'},
+                            {'label': 'High Queue', 'value': 'queue_high'},
+                            {'label': 'Queue Empty', 'value': 'queue_empty'},
+                            {'label': 'Redirect Active', 'value': 'redirect_active'},
+                            {'label': 'Redirect Inactive', 'value': 'redirect_inactive'}
+                        ]
+                    }
+                ]
+            },
+            'default_properties': {'value': 'printer_state', 'case1': 'offline', 'case2': 'online'}
+        },
+        {
+            'node_key': 'integration.api',
+            'name': 'API Call',
+            'description': 'Call an external API or webhook.',
+            'category': 'integration',
+            'color': '#0ea5e9',
+            'icon': 'Globe',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'url', 'label': 'URL', 'type': 'string'},
+                    {
+                        'key': 'method',
+                        'label': 'Method',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'GET', 'value': 'GET'},
+                            {'label': 'POST', 'value': 'POST'},
+                            {'label': 'PUT', 'value': 'PUT'},
+                            {'label': 'DELETE', 'value': 'DELETE'}
+                        ]
+                    },
+                    {'key': 'timeout', 'label': 'Timeout (ms)', 'type': 'number'}
+                ]
+            },
+            'default_properties': {'url': '', 'method': 'POST', 'timeout': 5000}
+        },
+        {
+            'node_key': 'integration.slack',
+            'name': 'Slack Message',
+            'description': 'Send a Slack message via webhook.',
+            'category': 'integration',
+            'color': '#0ea5e9',
+            'icon': 'MessageCircle',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'webhook_url', 'label': 'Webhook URL', 'type': 'string'},
+                    {'key': 'message', 'label': 'Message', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'webhook_url': '', 'message': ''}
+        },
+        {
+            'node_key': 'integration.teams',
+            'name': 'Teams Message',
+            'description': 'Send a Microsoft Teams webhook message.',
+            'category': 'integration',
+            'color': '#0ea5e9',
+            'icon': 'MessageSquare',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'webhook_url', 'label': 'Webhook URL', 'type': 'string'},
+                    {'key': 'message', 'label': 'Message', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'webhook_url': '', 'message': ''}
+        },
+        {
+            'node_key': 'integration.discord',
+            'name': 'Discord Message',
+            'description': 'Send a Discord webhook message.',
+            'category': 'integration',
+            'color': '#0ea5e9',
+            'icon': 'MessageCircle',
+            'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'config_schema': {
+                'fields': [
+                    {'key': 'webhook_url', 'label': 'Webhook URL', 'type': 'string'},
+                    {'key': 'message', 'label': 'Message', 'type': 'string'}
+                ]
+            },
+            'default_properties': {'webhook_url': '', 'message': ''}
+        }
+    ]
+
+    insert_rows = [
+        (
+            node['node_key'],
+            node['name'],
+            node['description'],
+            node['category'],
+            node['color'],
+            node['icon'],
+            json.dumps(node['inputs']),
+            json.dumps(node['outputs']),
+            json.dumps(node['config_schema']) if node.get('config_schema') is not None else None,
+            json.dumps(node['default_properties'])
+        )
+        for node in default_nodes
+        if node['node_key'] not in existing_keys
+    ]
+
+    if insert_rows:
+        cursor.executemany(
+            """
+            INSERT INTO workflow_registry_nodes
+            (node_key, name, description, category, color, icon, inputs, outputs, config_schema, default_properties)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            insert_rows
+        )
+
+    cursor.execute("UPDATE workflow_registry_nodes SET enabled = 0 WHERE node_key = 'transform.convert'")
     
     conn.commit()
     conn.close()
@@ -1044,6 +1736,382 @@ class PrinterRedirectSchedule:
         conn.commit()
         conn.close()
         return deleted > 0
+
+
+class WorkflowRegistryNode:
+    """Model for workflow registry nodes."""
+
+    @staticmethod
+    def get_all(include_disabled: bool = False) -> List[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if include_disabled:
+            cursor.execute("SELECT * FROM workflow_registry_nodes ORDER BY category, name")
+        else:
+            cursor.execute("SELECT * FROM workflow_registry_nodes WHERE enabled = 1 ORDER BY category, name")
+        rows = cursor.fetchall()
+        conn.close()
+        nodes = []
+        for row in rows:
+            nodes.append({
+                'id': row['id'],
+                'key': row['node_key'],
+                'name': row['name'],
+                'description': row['description'],
+                'category': row['category'],
+                'color': row['color'],
+                'icon': row['icon'],
+                'inputs': json.loads(row['inputs']) if row['inputs'] else [],
+                'outputs': json.loads(row['outputs']) if row['outputs'] else [],
+                'config_schema': json.loads(row['config_schema']) if row['config_schema'] else None,
+                'default_properties': json.loads(row['default_properties']) if row['default_properties'] else {},
+                'enabled': bool(row['enabled']),
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at']
+            })
+        return nodes
+
+    @staticmethod
+    def get_by_key(node_key: str) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM workflow_registry_nodes WHERE node_key = ?", (node_key,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            'id': row['id'],
+            'key': row['node_key'],
+            'name': row['name'],
+            'description': row['description'],
+            'category': row['category'],
+            'color': row['color'],
+            'icon': row['icon'],
+            'inputs': json.loads(row['inputs']) if row['inputs'] else [],
+            'outputs': json.loads(row['outputs']) if row['outputs'] else [],
+            'config_schema': json.loads(row['config_schema']) if row['config_schema'] else None,
+            'default_properties': json.loads(row['default_properties']) if row['default_properties'] else {},
+            'enabled': bool(row['enabled']),
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at']
+        }
+
+    @staticmethod
+    def create(payload: Dict[str, Any]) -> Dict[str, Any]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO workflow_registry_nodes
+            (node_key, name, description, category, color, icon, inputs, outputs, config_schema, default_properties, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload['key'],
+                payload['name'],
+                payload.get('description', ''),
+                payload['category'],
+                payload.get('color', '#10b981'),
+                payload.get('icon', 'Workflow'),
+                json.dumps(payload.get('inputs', [])),
+                json.dumps(payload.get('outputs', [])),
+                json.dumps(payload.get('config_schema')) if payload.get('config_schema') is not None else None,
+                json.dumps(payload.get('default_properties', {})),
+                int(payload.get('enabled', True))
+            )
+        )
+        conn.commit()
+        conn.close()
+        return WorkflowRegistryNode.get_by_key(payload['key'])
+
+    @staticmethod
+    def update(node_key: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE workflow_registry_nodes
+            SET name = ?, description = ?, category = ?, color = ?, icon = ?,
+                inputs = ?, outputs = ?, config_schema = ?, default_properties = ?, enabled = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE node_key = ?
+            """,
+            (
+                payload['name'],
+                payload.get('description', ''),
+                payload['category'],
+                payload.get('color', '#10b981'),
+                payload.get('icon', 'Workflow'),
+                json.dumps(payload.get('inputs', [])),
+                json.dumps(payload.get('outputs', [])),
+                json.dumps(payload.get('config_schema')) if payload.get('config_schema') is not None else None,
+                json.dumps(payload.get('default_properties', {})),
+                int(payload.get('enabled', True)),
+                node_key
+            )
+        )
+        conn.commit()
+        conn.close()
+        return WorkflowRegistryNode.get_by_key(node_key)
+
+    @staticmethod
+    def delete(node_key: str) -> bool:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM workflow_registry_nodes WHERE node_key = ?", (node_key,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted > 0
+
+
+class Workflow:
+    """Model for workflow graphs."""
+
+    @staticmethod
+    def get_all() -> List[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, name, description, is_active, created_by, created_at, updated_at
+            FROM workflows
+            ORDER BY updated_at DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def get_by_id(workflow_id: int) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,))
+        workflow = cursor.fetchone()
+        if not workflow:
+            conn.close()
+            return None
+
+        cursor.execute("SELECT * FROM workflow_nodes WHERE workflow_id = ?", (workflow_id,))
+        nodes = cursor.fetchall()
+        cursor.execute("SELECT * FROM workflow_edges WHERE workflow_id = ?", (workflow_id,))
+        edges = cursor.fetchall()
+        conn.close()
+
+        return {
+            'id': workflow['id'],
+            'name': workflow['name'],
+            'description': workflow['description'],
+            'is_active': bool(workflow['is_active']),
+            'created_by': workflow['created_by'],
+            'created_at': workflow['created_at'],
+            'updated_at': workflow['updated_at'],
+            'ui_state': json.loads(workflow['ui_state']) if workflow['ui_state'] else None,
+            'nodes': [
+                {
+                    'id': node['node_id'],
+                    'type': node['node_type'],
+                    'label': node['label'],
+                    'position': {'x': node['position_x'], 'y': node['position_y']},
+                    'properties': json.loads(node['properties']) if node['properties'] else {}
+                }
+                for node in nodes
+            ],
+            'edges': [
+                {
+                    'id': edge['id'],
+                    'source': edge['source_node_id'],
+                    'target': edge['target_node_id'],
+                    'sourceHandle': edge['source_handle'],
+                    'targetHandle': edge['target_handle']
+                }
+                for edge in edges
+            ]
+        }
+
+    @staticmethod
+    def create(name: str, description: str, created_by: str,
+               nodes: Optional[List[Dict[str, Any]]] = None,
+               edges: Optional[List[Dict[str, Any]]] = None,
+               ui_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO workflows (name, description, created_by, ui_state)
+            VALUES (?, ?, ?, ?)
+            """,
+            (name, description or '', created_by, json.dumps(ui_state) if ui_state else None)
+        )
+        conn.commit()
+        workflow_id = cursor.lastrowid
+        conn.close()
+
+        if nodes is not None or edges is not None:
+            Workflow.save_graph(workflow_id, nodes or [], edges or [])
+
+        return Workflow.get_by_id(workflow_id)
+
+    @staticmethod
+    def update(workflow_id: int, name: Optional[str] = None, description: Optional[str] = None,
+               is_active: Optional[bool] = None,
+               nodes: Optional[List[Dict[str, Any]]] = None,
+               edges: Optional[List[Dict[str, Any]]] = None,
+               ui_state: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        fields = []
+        values = []
+
+        if name is not None:
+            fields.append("name = ?")
+            values.append(name)
+        if description is not None:
+            fields.append("description = ?")
+            values.append(description)
+        if is_active is not None:
+            fields.append("is_active = ?")
+            values.append(int(is_active))
+        if ui_state is not None:
+            fields.append("ui_state = ?")
+            values.append(json.dumps(ui_state))
+
+        if fields:
+            fields.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(workflow_id)
+            cursor.execute(
+                f"UPDATE workflows SET {', '.join(fields)} WHERE id = ?",
+                values
+            )
+            conn.commit()
+        conn.close()
+
+        if nodes is not None or edges is not None:
+            Workflow.save_graph(workflow_id, nodes or [], edges or [])
+
+        return Workflow.get_by_id(workflow_id)
+
+    @staticmethod
+    def delete(workflow_id: int) -> bool:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted > 0
+
+    @staticmethod
+    def save_graph(workflow_id: int, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> None:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM workflow_edges WHERE workflow_id = ?", (workflow_id,))
+        cursor.execute("DELETE FROM workflow_nodes WHERE workflow_id = ?", (workflow_id,))
+
+        node_rows = []
+        for node in nodes:
+            position = node.get('position') or {}
+            node_rows.append((
+                workflow_id,
+                node['id'],
+                node['type'],
+                node.get('label', ''),
+                position.get('x', 0),
+                position.get('y', 0),
+                json.dumps(node.get('properties', {}))
+            ))
+
+        if node_rows:
+            cursor.executemany(
+                """
+                INSERT INTO workflow_nodes
+                (workflow_id, node_id, node_type, label, position_x, position_y, properties)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                node_rows
+            )
+
+        edge_rows = []
+        for edge in edges:
+            edge_rows.append((
+                workflow_id,
+                edge['source'],
+                edge['target'],
+                edge.get('sourceHandle'),
+                edge.get('targetHandle')
+            ))
+
+        if edge_rows:
+            cursor.executemany(
+                """
+                INSERT INTO workflow_edges
+                (workflow_id, source_node_id, target_node_id, source_handle, target_handle)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                edge_rows
+            )
+
+        cursor.execute("UPDATE workflows SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (workflow_id,))
+
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def validate_connection(workflow_id: int, source_node_id: str, target_node_id: str,
+                            source_handle: Optional[str], target_handle: Optional[str],
+                            source_node_type: Optional[str] = None,
+                            target_node_type: Optional[str] = None) -> Tuple[bool, str]:
+        def normalize_handle(handle: Optional[str]) -> Optional[str]:
+            if not handle:
+                return handle
+            return handle.split(':')[0]
+
+        if source_node_id == target_node_id:
+            return False, 'Cannot connect a node to itself.'
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT node_id, node_type FROM workflow_nodes WHERE workflow_id = ?", (workflow_id,))
+        nodes = cursor.fetchall()
+        conn.close()
+
+        node_map = {row['node_id']: row['node_type'] for row in nodes}
+        source_type = node_map.get(source_node_id) or source_node_type
+        target_type = node_map.get(target_node_id) or target_node_type
+        if not source_type or not target_type:
+            return False, 'Unknown node reference.'
+
+        source_registry = WorkflowRegistryNode.get_by_key(source_type)
+        target_registry = WorkflowRegistryNode.get_by_key(target_type)
+        if not source_registry or not target_registry:
+            return False, 'Unknown node type.'
+
+        source_outputs = source_registry.get('outputs', [])
+        target_inputs = target_registry.get('inputs', [])
+
+        normalized_source = normalize_handle(source_handle)
+        normalized_target = normalize_handle(target_handle)
+
+        if source_outputs:
+            output = next((item for item in source_outputs if item.get('id') == normalized_source), None)
+        else:
+            output = None
+        if target_inputs:
+            target = next((item for item in target_inputs if item.get('id') == normalized_target), None)
+        else:
+            target = None
+
+        if output is None:
+            return False, 'Invalid source handle.'
+        if target is None:
+            return False, 'Invalid target handle.'
+
+        output_type = output.get('type', 'any')
+        input_type = target.get('type', 'any')
+        if output_type != 'any' and input_type != 'any' and output_type != input_type:
+            return False, 'Incompatible connection types.'
+
+        return True, 'Connection valid.'
 
 
 class ActiveRedirect:

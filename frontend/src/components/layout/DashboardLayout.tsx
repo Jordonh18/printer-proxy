@@ -5,6 +5,7 @@ import {
   Printer,
   Layers,
   ArrowRightLeft,
+  GitBranch,
   ClipboardList,
   Users,
   Settings,
@@ -58,6 +59,7 @@ const navigationGroups = [
       { name: 'Printers', href: '/printers', icon: Printer },
       { name: 'Groups', href: '/groups', icon: Layers },
       { name: 'Redirects', href: '/redirects', icon: ArrowRightLeft, roles: ['admin', 'operator'] },
+      { name: 'Workflows', href: '/workflows', icon: GitBranch },
     ],
   },
   {
@@ -75,6 +77,7 @@ export function DashboardLayout() {
   const { t } = useTranslation();
   const isSettingsRoute = location.pathname.startsWith('/settings');
   const isAdminSettingsRoute = location.pathname.startsWith('/admin/settings');
+  const isWorkflowEditorRoute = location.pathname.match(/^\/workflows\/\d+$/);
   const activeSettingsTab = new URLSearchParams(location.search).get('tab') || 'account';
   const activeAdminTab = new URLSearchParams(location.search).get('tab') || 'general';
 
@@ -321,7 +324,7 @@ export function DashboardLayout() {
           <SidebarTrigger />
           <span className="text-sm font-medium text-muted-foreground">Menu</span>
         </div>
-        <div className="p-4 lg:p-8">
+        <div className={isWorkflowEditorRoute ? 'h-screen' : 'p-4 lg:p-8'}>
           <Outlet />
         </div>
       </SidebarInset>

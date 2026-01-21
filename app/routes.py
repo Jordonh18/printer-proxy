@@ -12,7 +12,7 @@ from flask_jwt_extended import (
 from flask_jwt_extended.exceptions import JWTExtendedException
 
 import sqlite3
-from app.models import AuditLog, ActiveRedirect, GroupRedirectSchedule, PrinterRedirectSchedule, PrinterGroup, User, UserSession, get_db_connection
+from app.models import AuditLog, ActiveRedirect, GroupRedirectSchedule, PrinterRedirectSchedule, PrinterGroup, User, UserSession, WorkflowRegistryNode, Workflow, get_db_connection
 from app.auth import authenticate_user, validate_password_strength, hash_password, verify_password
 from app.api_tokens import get_available_permissions
 from app.notification_manager import get_notification_manager
@@ -234,6 +234,171 @@ def api_auth_refresh():
         UserSession.create(user.id, jti, ip_address, user_agent)
 
     return jsonify({'access_token': access_token})
+
+
+# ============================================================================
+# Workflow Registry & Workflow API Routes
+# ============================================================================
+
+@api_bp.route('/workflow-registry', methods=['GET'])
+@api_auth_required
+def api_workflow_registry_list():
+    include_disabled = request.args.get('include_disabled', 'false').lower() == 'true'
+    if g.api_claims.get('role') != 'admin':
+        include_disabled = False
+    nodes = WorkflowRegistryNode.get_all(include_disabled=include_disabled)
+
+    from app.settings import get_settings_manager
+    from app.notifications import SMTPNotificationChannel
+
+    settings = get_settings_manager().get_all()
+    smtp_channel = SMTPNotificationChannel()
+    smtp_available = smtp_channel.is_enabled(settings) and smtp_channel.is_configured(settings)
+
+    slack_settings = settings.get('notifications', {}).get('slack', {})
+    teams_settings = settings.get('notifications', {}).get('teams', {})
+    discord_settings = settings.get('notifications', {}).get('discord', {})
+
+    def is_integration_enabled(config: dict) -> bool:
+        return bool(config.get('enabled')) and bool(config.get('webhook_url'))
+
+    filtered = []
+    for node in nodes:
+        key = node.get('key')
+        if key == 'action.notify.email' and not smtp_available:
+            continue
+        if key == 'integration.slack' and not is_integration_enabled(slack_settings):
+            continue
+        if key == 'integration.teams' and not is_integration_enabled(teams_settings):
+            continue
+        if key == 'integration.discord' and not is_integration_enabled(discord_settings):
+            continue
+        filtered.append(node)
+
+    return jsonify(filtered)
+
+
+@api_bp.route('/workflow-registry', methods=['POST'])
+@api_role_required('admin')
+def api_workflow_registry_create():
+    data = request.get_json() or {}
+    required_fields = ['key', 'name', 'category']
+    missing = [field for field in required_fields if not data.get(field)]
+    if missing:
+        return jsonify({'error': f"Missing required fields: {', '.join(missing)}"}), 400
+    node = WorkflowRegistryNode.create(data)
+    return jsonify(node), 201
+
+
+@api_bp.route('/workflow-registry/<node_key>', methods=['PUT'])
+@api_role_required('admin')
+def api_workflow_registry_update(node_key: str):
+    data = request.get_json() or {}
+    required_fields = ['name', 'category']
+    missing = [field for field in required_fields if not data.get(field)]
+    if missing:
+        return jsonify({'error': f"Missing required fields: {', '.join(missing)}"}), 400
+    node = WorkflowRegistryNode.update(node_key, data)
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+    return jsonify(node)
+
+
+@api_bp.route('/workflow-registry/<node_key>', methods=['DELETE'])
+@api_role_required('admin')
+def api_workflow_registry_delete(node_key: str):
+    deleted = WorkflowRegistryNode.delete(node_key)
+    if not deleted:
+        return jsonify({'error': 'Node not found'}), 404
+    return jsonify({'status': 'deleted'})
+
+
+@api_bp.route('/workflows', methods=['GET'])
+@api_auth_required
+def api_workflows_list():
+    return jsonify(Workflow.get_all())
+
+
+@api_bp.route('/workflows', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_workflows_create():
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Workflow name is required'}), 400
+    workflow = Workflow.create(
+        name=name,
+        description=data.get('description', ''),
+        created_by=g.api_claims.get('username', 'unknown'),
+        nodes=data.get('nodes'),
+        edges=data.get('edges'),
+        ui_state=data.get('ui_state')
+    )
+    return jsonify(workflow), 201
+
+
+@api_bp.route('/workflows/<int:workflow_id>', methods=['GET'])
+@api_auth_required
+def api_workflows_get(workflow_id: int):
+    workflow = Workflow.get_by_id(workflow_id)
+    if not workflow:
+        return jsonify({'error': 'Workflow not found'}), 404
+    return jsonify(workflow)
+
+
+@api_bp.route('/workflows/<int:workflow_id>', methods=['PUT'])
+@api_role_required('admin', 'operator')
+def api_workflows_update(workflow_id: int):
+    data = request.get_json() or {}
+    workflow = Workflow.update(
+        workflow_id,
+        name=data.get('name'),
+        description=data.get('description'),
+        is_active=data.get('is_active'),
+        nodes=data.get('nodes'),
+        edges=data.get('edges'),
+        ui_state=data.get('ui_state')
+    )
+    if not workflow:
+        return jsonify({'error': 'Workflow not found'}), 404
+    return jsonify(workflow)
+
+
+@api_bp.route('/workflows/<int:workflow_id>', methods=['DELETE'])
+@api_role_required('admin', 'operator')
+def api_workflows_delete(workflow_id: int):
+    deleted = Workflow.delete(workflow_id)
+    if not deleted:
+        return jsonify({'error': 'Workflow not found'}), 404
+    return jsonify({'status': 'deleted'})
+
+
+@api_bp.route('/workflows/<int:workflow_id>/validate-connection', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_workflows_validate_connection(workflow_id: int):
+    data = request.get_json() or {}
+    source_node_id = data.get('source_node_id')
+    target_node_id = data.get('target_node_id')
+    source_handle = data.get('source_handle')
+    target_handle = data.get('target_handle')
+    source_node_type = data.get('source_node_type')
+    target_node_type = data.get('target_node_type')
+
+    if not source_node_id or not target_node_id:
+        return jsonify({'error': 'Missing source or target node'}), 400
+
+    valid, message = Workflow.validate_connection(
+        workflow_id,
+        source_node_id,
+        target_node_id,
+        source_handle,
+        target_handle,
+        source_node_type,
+        target_node_type
+    )
+    if not valid:
+        return jsonify({'valid': False, 'message': message}), 400
+    return jsonify({'valid': True, 'message': message})
 
 
 @api_bp.route('/auth/me')

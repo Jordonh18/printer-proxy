@@ -204,3 +204,77 @@ export interface PrinterGroupDetail extends PrinterGroup {
   printer_ids: string[];
 }
 
+// Workflow types
+export interface WorkflowPort {
+  id: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+}
+
+export interface WorkflowConfigFieldOption {
+  label: string;
+  value: string;
+}
+
+export interface WorkflowConfigField {
+  key: string;
+  label: string;
+  type: 'string' | 'number' | 'boolean' | 'select';
+  placeholder?: string;
+  options?: WorkflowConfigFieldOption[];
+  readOnly?: boolean;
+  helperText?: string;
+}
+
+export interface WorkflowRegistryNode {
+  id: number;
+  key: string;
+  name: string;
+  description: string;
+  category: 'trigger' | 'action' | 'transform' | 'conditional' | 'integration' | string;
+  color: string;
+  icon?: string;
+  inputs: WorkflowPort[];
+  outputs: WorkflowPort[];
+  config_schema?: {
+    fields: WorkflowConfigField[];
+  } | null;
+  default_properties?: Record<string, unknown>;
+  enabled: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface WorkflowNode {
+  id: string;
+  type: string;
+  label?: string;
+  position: {
+    x: number;
+    y: number;
+  };
+  properties?: Record<string, unknown>;
+}
+
+export interface WorkflowEdge {
+  id: string | number;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
+export interface Workflow {
+  id: number;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  ui_state?: Record<string, unknown> | null;
+  nodes?: WorkflowNode[];
+  edges?: WorkflowEdge[];
+}
+
