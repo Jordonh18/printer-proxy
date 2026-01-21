@@ -135,7 +135,9 @@ class PrinterRegistry:
         is_target = ActiveRedirect.is_target_in_use(printer.id)
 
         cached = self._get_cached_status(printer.id) if use_cache else None
-        return self._build_status(printer, redirect, is_target, cached, use_cache)
+        group_map = self._get_group_mappings([printer.id])
+        group_info = group_map.get(printer.id)
+        return self._build_status(printer, redirect, is_target, cached, use_cache, group_info)
     
     def _get_cached_status(self, printer_id: str) -> Optional[Dict[str, Any]]:
         """Get cached health status for a printer."""
@@ -167,7 +169,8 @@ class PrinterRegistry:
         redirect: Optional[ActiveRedirect],
         is_target: bool,
         cached: Optional[Dict[str, Any]],
-        use_cache: bool
+        use_cache: bool,
+        group_info: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Build a normalized status payload for a printer."""
         is_redirected = redirect is not None
@@ -193,6 +196,7 @@ class PrinterRegistry:
 
         return {
             "printer": printer.to_dict(),
+            "group": group_info,
             "status": {
                 "icmp_reachable": icmp_reachable,
                 "tcp_reachable": tcp_reachable,
@@ -206,6 +210,32 @@ class PrinterRegistry:
                     "enabled_by": redirect.enabled_by if redirect else None
                 } if redirect else None
             }
+        }
+
+    def _get_group_mappings(self, printer_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Get group mappings for a list of printer IDs."""
+        if not printer_ids:
+            return {}
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        placeholders = ",".join(["?"] * len(printer_ids))
+        cursor.execute(
+            f"""
+            SELECT pgm.printer_id, pg.id AS group_id, pg.name AS group_name
+            FROM printer_group_members pgm
+            JOIN printer_groups pg ON pg.id = pgm.group_id
+            WHERE pgm.printer_id IN ({placeholders})
+            """,
+            printer_ids
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return {
+            row['printer_id']: {
+                'id': row['group_id'],
+                'name': row['group_name']
+            }
+            for row in rows
         }
     
     def get_all_statuses(self, use_cache: bool = True) -> List[Dict[str, Any]]:
@@ -223,13 +253,15 @@ class PrinterRegistry:
         targets_in_use = {r.target_printer_id for r in redirects}
 
         cached_by_id = self._get_cached_statuses([p.id for p in printers]) if use_cache else {}
+        group_map = self._get_group_mappings([p.id for p in printers])
 
         statuses = []
         for printer in printers:
             redirect = redirects_by_source.get(printer.id)
             is_target = printer.id in targets_in_use
             cached = cached_by_id.get(printer.id)
-            statuses.append(self._build_status(printer, redirect, is_target, cached, use_cache))
+            group_info = group_map.get(printer.id)
+            statuses.append(self._build_status(printer, redirect, is_target, cached, use_cache, group_info))
 
         return statuses
     

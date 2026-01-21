@@ -56,15 +56,15 @@
 ## 💡 Nice to Have
 
 ### Dark Mode
-- [ ] CSS theme toggle
-- [ ] Remember preference
-- [ ] System preference detection
+- [x] CSS theme toggle
+- [x] Remember preference
+- [x] System preference detection
 
 ### Multi-user Roles
-- [ ] Admin role (full access)
-- [ ] Operator role (manage redirects, view only printers)
-- [ ] Viewer role (read-only dashboard)
-- [ ] User management page
+- [x ] Admin role (full access)
+- [x ] Operator role (manage redirects, view only printers)
+- [ x] Viewer role (read-only dashboard)
+- [ x] User management page
 
 ### Printer Groups
 - [ ] Create groups (e.g., "Floor 1", "Marketing")

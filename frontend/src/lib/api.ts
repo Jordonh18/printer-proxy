@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AuthResponse, User, SmtpSettings } from '@/types/api';
+import type { AuthResponse, User, SmtpSettings, PrinterGroup, PrinterGroupDetail } from '@/types/api';
 
 const API_BASE = '/api';
 
@@ -281,6 +281,104 @@ export const redirectsApi = {
 
   delete: async (id: number) => {
     const response = await api.delete(`/redirects/${id}`);
+    return response.data;
+  },
+};
+
+// Printer Groups API
+export const printerGroupsApi = {
+  getAll: async (): Promise<{ groups: PrinterGroup[] }> => {
+    const response = await api.get('/printer-groups');
+    return response.data;
+  },
+
+  getById: async (id: number): Promise<PrinterGroupDetail> => {
+    const response = await api.get(`/printer-groups/${id}`);
+    return response.data;
+  },
+
+  create: async (data: { name: string; description?: string }): Promise<PrinterGroupDetail> => {
+    const response = await api.post('/printer-groups', data);
+    return response.data;
+  },
+
+  update: async (id: number, data: { name: string; description?: string }): Promise<PrinterGroupDetail> => {
+    const response = await api.put(`/printer-groups/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/printer-groups/${id}`);
+    return response.data;
+  },
+
+  setPrinters: async (id: number, printer_ids: string[]): Promise<PrinterGroupDetail> => {
+    const response = await api.put(`/printer-groups/${id}/printers`, { printer_ids });
+    return response.data;
+  },
+};
+
+// Group Redirect Schedules API
+export const groupRedirectSchedulesApi = {
+  getAll: async (group_id?: number): Promise<{ schedules: any[] }> => {
+    const response = await api.get('/group-redirect-schedules', {
+      params: group_id ? { group_id } : undefined,
+    });
+    return response.data;
+  },
+
+  create: async (data: { group_id: number; target_printer_id: string; start_at: string; end_at?: string | null }): Promise<any> => {
+    const response = await api.post('/group-redirect-schedules', data);
+    return response.data;
+  },
+
+  update: async (id: number, data: { target_printer_id: string; start_at: string; end_at?: string | null; enabled: boolean }): Promise<any> => {
+    const response = await api.put(`/group-redirect-schedules/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/group-redirect-schedules/${id}`);
+    return response.data;
+  },
+};
+
+// Printer Redirect Schedules API
+export const printerRedirectSchedulesApi = {
+  getAll: async (source_printer_id?: string): Promise<{ schedules: any[] }> => {
+    const response = await api.get('/printer-redirect-schedules', {
+      params: source_printer_id ? { source_printer_id } : undefined,
+    });
+    return response.data;
+  },
+
+  create: async (data: { source_printer_id: string; target_printer_id: string; start_at: string; end_at?: string | null }): Promise<any> => {
+    const response = await api.post('/printer-redirect-schedules', data);
+    return response.data;
+  },
+
+  update: async (id: number, data: { target_printer_id: string; start_at: string; end_at?: string | null; enabled: boolean }): Promise<any> => {
+    const response = await api.put(`/printer-redirect-schedules/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/printer-redirect-schedules/${id}`);
+    return response.data;
+  },
+};
+
+// Notification Subscriptions API
+export const notificationSubscriptionsApi = {
+  get: async (preference?: string): Promise<{ preference?: string; group_ids?: number[]; subscriptions?: Record<string, number[]> }> => {
+    const response = await api.get('/notifications/subscriptions', {
+      params: preference ? { preference } : undefined,
+    });
+    return response.data;
+  },
+
+  update: async (preference: string, group_ids: number[]): Promise<{ preference: string; group_ids: number[] }> => {
+    const response = await api.put('/notifications/subscriptions', { preference, group_ids });
     return response.data;
   },
 };

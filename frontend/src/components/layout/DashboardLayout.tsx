@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard,
   Printer,
+  Layers,
   ArrowRightLeft,
   ClipboardList,
   Users,
@@ -55,6 +56,7 @@ const navigationGroups = [
     label: 'Fleet',
     items: [
       { name: 'Printers', href: '/printers', icon: Printer },
+      { name: 'Groups', href: '/groups', icon: Layers },
       { name: 'Redirects', href: '/redirects', icon: ArrowRightLeft, roles: ['admin', 'operator'] },
     ],
   },

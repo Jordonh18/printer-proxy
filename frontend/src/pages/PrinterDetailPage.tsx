@@ -5,6 +5,7 @@ import { printersApi } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Loader2, Pencil, Trash2, RefreshCw, ExternalLink } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { PrinterStatus } from '@/types/api';
@@ -24,6 +25,7 @@ export function PrinterDetailPage() {
     queryFn: () => printersApi.getById(id!),
     refetchInterval: 10000,
   });
+  const group = printerStatus?.group;
 
   useDocumentTitle(printerStatus?.printer?.name || 'Printer Details');
 
@@ -42,6 +44,7 @@ export function PrinterDetailPage() {
     queryFn: () => printersApi.getAudit(id!),
   });
 
+
   const refreshMutation = useMutation({
     mutationFn: () => printersApi.refresh(id!),
     onSuccess: () => {
@@ -57,6 +60,7 @@ export function PrinterDetailPage() {
       navigate('/printers');
     },
   });
+
 
   const handleDelete = () => {
     if (confirm(`Are you sure you want to delete "${printerStatus?.printer.name}"?`)) {
@@ -117,6 +121,11 @@ export function PrinterDetailPage() {
               <ExternalLink className="h-4 w-4" />
             </a>
           </div>
+          {group?.name && (
+            <Badge variant="secondary" className="mt-2">
+              {group.name}
+            </Badge>
+          )}
         </div>
         {canEdit && (
           <div className="flex gap-2">

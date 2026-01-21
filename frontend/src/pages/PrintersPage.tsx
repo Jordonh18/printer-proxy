@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { printersApi, discoveryApi } from '@/lib/api';
+import { printersApi, discoveryApi, printerGroupsApi } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -57,6 +57,9 @@ export function PrintersPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editError, setEditError] = useState('');
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [editForm, setEditForm] = useState({
     name: '',
     ip: '',
@@ -77,6 +80,11 @@ export function PrintersPage() {
   const { data: printers, isLoading } = useQuery<PrinterStatus[]>({
     queryKey: ['printers'],
     queryFn: printersApi.getAll,
+  });
+
+  const { data: printerGroups } = useQuery({
+    queryKey: ['printer-groups'],
+    queryFn: printerGroupsApi.getAll,
   });
 
   const deleteMutation = useMutation({
@@ -264,6 +272,36 @@ export function PrintersPage() {
   }
 
   const hasPrinters = !!(printers && printers.length > 0);
+  const groupOptions = printerGroups?.groups ?? [];
+  const filteredPrinters = (printers ?? []).filter((printerStatus) => {
+    if (groupFilter === 'all') return true;
+    if (groupFilter === 'ungrouped') return !printerStatus.group?.id;
+    return printerStatus.group?.id?.toString() === groupFilter;
+  }).filter((printerStatus) => {
+    if (statusFilter === 'all') return true;
+    const status = printerStatus.status ?? {};
+    const isOnline = status.is_online ?? (printerStatus as unknown as { is_online?: boolean }).is_online ?? false;
+    const hasRedirect = status.is_redirected ?? (printerStatus as unknown as { has_redirect?: boolean }).has_redirect ?? false;
+    const isTarget = status.is_redirect_target ?? (printerStatus as unknown as { is_target?: boolean }).is_target ?? false;
+    if (statusFilter === 'online') return isOnline && !hasRedirect && !isTarget;
+    if (statusFilter === 'offline') return !isOnline && !hasRedirect && !isTarget;
+    if (statusFilter === 'redirected') return hasRedirect;
+    if (statusFilter === 'target') return isTarget;
+    return true;
+  }).filter((printerStatus) => {
+    if (!searchQuery.trim()) return true;
+    const needle = searchQuery.toLowerCase();
+    const groupName = printerStatus.group?.name || '';
+    return [
+      printerStatus.printer.name,
+      printerStatus.printer.ip,
+      printerStatus.printer.model || '',
+      printerStatus.printer.location || '',
+      groupName,
+    ].some((field) => field.toLowerCase().includes(needle));
+  });
+  const filteredCount = filteredPrinters.length;
+  const totalCount = printers?.length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -286,6 +324,54 @@ export function PrintersPage() {
       {deleteError && (
         <div className="rounded-lg bg-error-bg p-3 text-sm text-error">
           {deleteError}
+        </div>
+      )}
+
+      {hasPrinters && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="w-full sm:max-w-sm">
+            <Input
+              id="printer-search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search by name, IP, model, or group"
+            />
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <p className="text-sm text-muted-foreground">
+              {filteredCount} of {totalCount}
+            </p>
+            <div className="min-w-[180px]">
+              <select
+                id="group-filter"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                value={groupFilter}
+                onChange={(event) => setGroupFilter(event.target.value)}
+              >
+                <option value="all">All groups</option>
+                <option value="ungrouped">Ungrouped</option>
+                {groupOptions.map((group) => (
+                  <option key={group.id} value={group.id.toString()}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="min-w-[160px]">
+              <select
+                id="status-filter"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+              >
+                <option value="all">All statuses</option>
+                <option value="online">Online</option>
+                <option value="offline">Offline</option>
+                <option value="redirected">Redirected</option>
+                <option value="target">Target</option>
+              </select>
+            </div>
+          </div>
         </div>
       )}
 
@@ -741,13 +827,20 @@ export function PrintersPage() {
                 <TableRow>
                   <TableHead className="px-4">Printer</TableHead>
                   <TableHead className="px-4">IP Address</TableHead>
+                  <TableHead className="px-4">Group</TableHead>
                   <TableHead className="px-4">Location</TableHead>
                   <TableHead className="px-4">Status</TableHead>
                   <TableHead className="px-4 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {printers.map((printerStatus) => {
+                {filteredPrinters.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                      No printers match this filter.
+                    </TableCell>
+                  </TableRow>
+                ) : filteredPrinters.map((printerStatus) => {
                   const { printer, status } = printerStatus;
                   const isOnline = status?.is_online ?? (printerStatus as unknown as { is_online?: boolean }).is_online ?? false;
                   const hasRedirect = status?.is_redirected ?? (printerStatus as unknown as { has_redirect?: boolean }).has_redirect ?? false;
@@ -783,6 +876,9 @@ export function PrintersPage() {
                         <Badge variant="outline" className="font-mono">
                           {printer.ip}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="px-4 text-sm text-muted-foreground">
+                        {printerStatus.group?.name || '—'}
                       </TableCell>
                       <TableCell className="px-4 text-muted-foreground">
                         {printer.location || '—'}

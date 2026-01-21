@@ -146,6 +146,128 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Printer groups table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS printer_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT DEFAULT '',
+            owner_user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Ensure owner_user_id exists for older installs
+    cursor.execute("PRAGMA table_info(printer_groups)")
+    group_columns = {row[1] for row in cursor.fetchall()}
+    if 'owner_user_id' not in group_columns:
+        cursor.execute("ALTER TABLE printer_groups ADD COLUMN owner_user_id INTEGER")
+        cursor.execute("UPDATE printer_groups SET owner_user_id = 1 WHERE owner_user_id IS NULL")
+
+    # Printer group members table (one group per printer enforced by UNIQUE)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS printer_group_members (
+            group_id INTEGER NOT NULL,
+            printer_id TEXT NOT NULL UNIQUE,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES printer_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (printer_id) REFERENCES printers(id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_printer_group_members_group
+        ON printer_group_members(group_id)
+    """)
+
+    # Group redirect schedules table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS group_redirect_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            target_printer_id TEXT NOT NULL,
+            start_at TIMESTAMP NOT NULL,
+            end_at TIMESTAMP,
+            enabled BOOLEAN DEFAULT 1,
+            is_active BOOLEAN DEFAULT 0,
+            last_activated_at TIMESTAMP,
+            last_deactivated_at TIMESTAMP,
+            created_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES printer_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_printer_id) REFERENCES printers(id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_group_redirect_schedules_group
+        ON group_redirect_schedules(group_id)
+    """)
+
+    # Printer redirect schedules table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS printer_redirect_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_printer_id TEXT NOT NULL,
+            target_printer_id TEXT NOT NULL,
+            start_at TIMESTAMP NOT NULL,
+            end_at TIMESTAMP,
+            enabled BOOLEAN DEFAULT 1,
+            is_active BOOLEAN DEFAULT 0,
+            last_activated_at TIMESTAMP,
+            last_deactivated_at TIMESTAMP,
+            created_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (source_printer_id) REFERENCES printers(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_printer_id) REFERENCES printers(id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_printer_redirect_schedules_source
+        ON printer_redirect_schedules(source_printer_id)
+    """)
+
+    # Group redirect instances (track redirects created by schedules)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS group_redirect_instances (
+            schedule_id INTEGER NOT NULL,
+            redirect_id INTEGER NOT NULL,
+            source_printer_id TEXT NOT NULL,
+            PRIMARY KEY (schedule_id, redirect_id),
+            FOREIGN KEY (schedule_id) REFERENCES group_redirect_schedules(id) ON DELETE CASCADE,
+            FOREIGN KEY (redirect_id) REFERENCES active_redirects(id) ON DELETE CASCADE
+        )
+    """)
+
+    # Printer redirect instances (track redirects created by schedules)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS printer_redirect_instances (
+            schedule_id INTEGER NOT NULL,
+            redirect_id INTEGER NOT NULL,
+            source_printer_id TEXT NOT NULL,
+            PRIMARY KEY (schedule_id, redirect_id),
+            FOREIGN KEY (schedule_id) REFERENCES printer_redirect_schedules(id) ON DELETE CASCADE,
+            FOREIGN KEY (redirect_id) REFERENCES active_redirects(id) ON DELETE CASCADE
+        )
+    """)
+
+    # Group-based notification subscriptions
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_group_subscriptions (
+            user_id INTEGER NOT NULL,
+            group_id INTEGER NOT NULL,
+            preference_key TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, group_id, preference_key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (group_id) REFERENCES printer_groups(id) ON DELETE CASCADE
+        )
+    """)
     
     # Redirect history table for statistics
     cursor.execute("""
@@ -664,6 +786,266 @@ class User:
         self.mfa_recovery_codes = codes_json
 
 
+class PrinterGroup:
+    """Model for printer groups."""
+
+    @staticmethod
+    def get_all() -> List[Dict[str, Any]]:
+        """Get all printer groups with printer counts."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pg.id, pg.name, pg.description, pg.owner_user_id, pg.created_at, pg.updated_at,
+                   u.username AS owner_username,
+                   COUNT(pgm.printer_id) AS printer_count
+            FROM printer_groups pg
+            LEFT JOIN printer_group_members pgm ON pg.id = pgm.group_id
+            LEFT JOIN users u ON u.id = pg.owner_user_id
+            GROUP BY pg.id
+            ORDER BY pg.name
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def get_by_id(group_id: int) -> Optional[Dict[str, Any]]:
+        """Get a printer group by ID with member printer IDs."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pg.*, u.username AS owner_username
+            FROM printer_groups pg
+            LEFT JOIN users u ON u.id = pg.owner_user_id
+            WHERE pg.id = ?
+        """, (group_id,))
+        group_row = cursor.fetchone()
+        if not group_row:
+            conn.close()
+            return None
+
+        cursor.execute(
+            "SELECT printer_id FROM printer_group_members WHERE group_id = ?",
+            (group_id,)
+        )
+        printer_rows = cursor.fetchall()
+        conn.close()
+
+        group = dict(group_row)
+        group['printer_ids'] = [row['printer_id'] for row in printer_rows]
+        group['printer_count'] = len(group['printer_ids'])
+        return group
+
+    @staticmethod
+    def create(name: str, description: str = '', owner_user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Create a new printer group."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO printer_groups (name, description, owner_user_id) VALUES (?, ?, ?)",
+            (name, description or '', owner_user_id)
+        )
+        conn.commit()
+        group_id = cursor.lastrowid
+        conn.close()
+        return PrinterGroup.get_by_id(group_id)
+
+    @staticmethod
+    def update(group_id: int, name: str, description: str = '') -> Optional[Dict[str, Any]]:
+        """Update an existing printer group."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE printer_groups SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (name, description or '', group_id)
+        )
+        conn.commit()
+        conn.close()
+        return PrinterGroup.get_by_id(group_id)
+
+    @staticmethod
+    def delete(group_id: int) -> bool:
+        """Delete a printer group and its members."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM printer_group_members WHERE group_id = ?", (group_id,))
+        cursor.execute("DELETE FROM printer_groups WHERE id = ?", (group_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted > 0
+
+    @staticmethod
+    def set_printers(group_id: int, printer_ids: List[str]) -> None:
+        """Set printer memberships for a group (one group per printer)."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Clear existing members for this group
+        cursor.execute("DELETE FROM printer_group_members WHERE group_id = ?", (group_id,))
+
+        if printer_ids:
+            # Remove printers from other groups to enforce 1 group per printer
+            placeholders = ",".join(["?"] * len(printer_ids))
+            cursor.execute(
+                f"DELETE FROM printer_group_members WHERE printer_id IN ({placeholders}) AND group_id != ?",
+                (*printer_ids, group_id)
+            )
+
+            cursor.executemany(
+                "INSERT INTO printer_group_members (group_id, printer_id) VALUES (?, ?)",
+                [(group_id, printer_id) for printer_id in printer_ids]
+            )
+
+        conn.commit()
+        conn.close()
+
+
+class GroupRedirectSchedule:
+    """Model for group redirect schedules."""
+
+    @staticmethod
+    def get_all(group_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if group_id is None:
+            cursor.execute("""
+                SELECT grs.*, pg.name AS group_name, p.name AS target_printer_name
+                FROM group_redirect_schedules grs
+                JOIN printer_groups pg ON pg.id = grs.group_id
+                JOIN printers p ON p.id = grs.target_printer_id
+                ORDER BY grs.start_at DESC
+            """)
+        else:
+            cursor.execute("""
+                SELECT grs.*, pg.name AS group_name, p.name AS target_printer_name
+                FROM group_redirect_schedules grs
+                JOIN printer_groups pg ON pg.id = grs.group_id
+                JOIN printers p ON p.id = grs.target_printer_id
+                WHERE grs.group_id = ?
+                ORDER BY grs.start_at DESC
+            """, (group_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def create(group_id: int, target_printer_id: str, start_at: str, end_at: Optional[str], created_by: str) -> Dict[str, Any]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO group_redirect_schedules (group_id, target_printer_id, start_at, end_at, created_by)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (group_id, target_printer_id, start_at, end_at, created_by)
+        )
+        conn.commit()
+        schedule_id = cursor.lastrowid
+        conn.close()
+        schedules = GroupRedirectSchedule.get_all()
+        return next((s for s in schedules if s['id'] == schedule_id), None)
+
+    @staticmethod
+    def update(schedule_id: int, target_printer_id: str, start_at: str, end_at: Optional[str], enabled: bool) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE group_redirect_schedules
+            SET target_printer_id = ?, start_at = ?, end_at = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (target_printer_id, start_at, end_at, int(enabled), schedule_id)
+        )
+        conn.commit()
+        conn.close()
+        schedules = GroupRedirectSchedule.get_all()
+        return next((s for s in schedules if s['id'] == schedule_id), None)
+
+    @staticmethod
+    def delete(schedule_id: int) -> bool:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM group_redirect_schedules WHERE id = ?", (schedule_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted > 0
+
+
+class PrinterRedirectSchedule:
+    @staticmethod
+    def get_all(source_printer_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if source_printer_id:
+            cursor.execute("""
+                SELECT prs.*, sp.name AS source_printer_name, tp.name AS target_printer_name
+                FROM printer_redirect_schedules prs
+                JOIN printers sp ON sp.id = prs.source_printer_id
+                JOIN printers tp ON tp.id = prs.target_printer_id
+                WHERE prs.source_printer_id = ?
+                ORDER BY prs.start_at DESC
+            """, (source_printer_id,))
+        else:
+            cursor.execute("""
+                SELECT prs.*, sp.name AS source_printer_name, tp.name AS target_printer_name
+                FROM printer_redirect_schedules prs
+                JOIN printers sp ON sp.id = prs.source_printer_id
+                JOIN printers tp ON tp.id = prs.target_printer_id
+                ORDER BY prs.start_at DESC
+            """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def create(source_printer_id: str, target_printer_id: str, start_at: str, end_at: Optional[str], created_by: str) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO printer_redirect_schedules (source_printer_id, target_printer_id, start_at, end_at, created_by)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (source_printer_id, target_printer_id, start_at, end_at, created_by)
+        )
+        conn.commit()
+        schedule_id = cursor.lastrowid
+        conn.close()
+        schedules = PrinterRedirectSchedule.get_all()
+        return next((s for s in schedules if s['id'] == schedule_id), None)
+
+    @staticmethod
+    def update(schedule_id: int, target_printer_id: str, start_at: str, end_at: Optional[str], enabled: bool) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE printer_redirect_schedules
+            SET target_printer_id = ?, start_at = ?, end_at = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (target_printer_id, start_at, end_at, int(enabled), schedule_id)
+        )
+        conn.commit()
+        conn.close()
+        schedules = PrinterRedirectSchedule.get_all()
+        return next((s for s in schedules if s['id'] == schedule_id), None)
+
+    @staticmethod
+    def delete(schedule_id: int) -> bool:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM printer_redirect_schedules WHERE id = ?", (schedule_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted > 0
+
+
 class ActiveRedirect:
     """Model for active printer redirects."""
     
@@ -733,6 +1115,29 @@ class ActiveRedirect:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM active_redirects WHERE source_ip = ?", (ip,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return ActiveRedirect(
+                id=row['id'],
+                source_printer_id=row['source_printer_id'],
+                source_ip=row['source_ip'],
+                target_printer_id=row['target_printer_id'],
+                target_ip=row['target_ip'],
+                protocol=row['protocol'],
+                port=row['port'],
+                enabled_at=row['enabled_at'],
+                enabled_by=row['enabled_by']
+            )
+        return None
+
+    @staticmethod
+    def get_by_id(redirect_id: int) -> Optional['ActiveRedirect']:
+        """Get redirect by ID."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM active_redirects WHERE id = ?", (redirect_id,))
         row = cursor.fetchone()
         conn.close()
 

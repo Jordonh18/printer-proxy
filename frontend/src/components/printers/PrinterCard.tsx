@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from './StatusBadge';
 import { Printer, MapPin, ArrowRight } from 'lucide-react';
 import type { PrinterStatus } from '@/types/api';
@@ -10,6 +11,7 @@ interface PrinterCardProps {
 
 export function PrinterCard({ printerStatus }: PrinterCardProps) {
   const { printer, status, redirect_target, redirect_source } = printerStatus;
+  const group = printerStatus.group;
   const isOnline = status?.is_online ?? (printerStatus as unknown as { is_online?: boolean }).is_online ?? false;
   const hasRedirect = status?.is_redirected ?? (printerStatus as unknown as { has_redirect?: boolean }).has_redirect ?? false;
   const isTarget = status?.is_redirect_target ?? (printerStatus as unknown as { is_target?: boolean }).is_target ?? false;
@@ -32,6 +34,11 @@ export function PrinterCard({ printerStatus }: PrinterCardProps) {
             <div className="min-w-0">
               <h3 className="font-semibold truncate">{printer.name}</h3>
               <p className="text-sm text-muted-foreground">{printer.ip}</p>
+              {group?.name && (
+                <Badge variant="secondary" className="mt-2 text-xs">
+                  {group.name}
+                </Badge>
+              )}
             </div>
           </div>
           <StatusBadge status={getStatus()} />

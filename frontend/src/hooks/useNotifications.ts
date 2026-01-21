@@ -68,14 +68,14 @@ export function useNotificationStream() {
 
     const connect = () => {
       // Get JWT token from localStorage
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('access_token');
       if (!token) {
         console.log('No auth token, skipping notification stream');
         return;
       }
 
       // Create EventSource with auth token in URL
-      const url = `/api/notifications/stream`;
+      const url = `/api/notifications/stream?access_token=${encodeURIComponent(token)}`;
       const eventSource = new EventSource(url);
       eventSourceRef.current = eventSource;
 

@@ -9,6 +9,7 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { PrintersPage } from '@/pages/PrintersPage';
 import { PrinterDetailPage } from '@/pages/PrinterDetailPage';
 import { RedirectsPage } from '@/pages/RedirectsPage';
+import { GroupsPage } from '@/pages/GroupsPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { AdminSettingsPage } from '@/pages/AdminSettingsPage';
@@ -55,6 +56,7 @@ function App() {
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/printers" element={<PrintersPage />} />
                 <Route path="/printers/:id" element={<PrinterDetailPage />} />
+                <Route path="/groups" element={<GroupsPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route
                   path="/redirects"

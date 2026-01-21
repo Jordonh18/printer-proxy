@@ -326,10 +326,17 @@ def notify_printer_offline(printer_name: str, printer_ip: str):
     users = get_users_with_preference('offline_alerts')
     if not users:
         return
+
+    group_id = get_printer_group_id_by_ip(printer_ip)
+    subscriptions = get_group_subscriptions('offline_alerts')
     
     # Create in-app notifications for all users with this preference
     notif_mgr = get_notif_mgr()
     for user in users:
+        user_groups = subscriptions.get(user['id'], [])
+        if user_groups:
+            if not group_id or group_id not in user_groups:
+                continue
         notif_mgr.create_notification(
             user_id=user['id'],
             type='error',
@@ -338,7 +345,9 @@ def notify_printer_offline(printer_name: str, printer_ip: str):
             link=f"/printers"
         )
     
-    recipient_emails = [u['email'] for u in users if u['email']]
+    recipient_emails = [u['email'] for u in users if u['email'] and (
+        not subscriptions.get(u['id']) or (group_id and group_id in subscriptions.get(u['id'], []))
+    )]
     if not recipient_emails:
         return
     
@@ -382,10 +391,17 @@ def notify_printer_online(printer_name: str, printer_ip: str):
     users = get_users_with_preference('offline_alerts')
     if not users:
         return
+
+    group_id = get_printer_group_id_by_ip(printer_ip)
+    subscriptions = get_group_subscriptions('offline_alerts')
     
     # Create in-app notifications for all users with this preference
     notif_mgr = get_notif_mgr()
     for user in users:
+        user_groups = subscriptions.get(user['id'], [])
+        if user_groups:
+            if not group_id or group_id not in user_groups:
+                continue
         notif_mgr.create_notification(
             user_id=user['id'],
             type='success',
@@ -394,7 +410,9 @@ def notify_printer_online(printer_name: str, printer_ip: str):
             link=f"/printers"
         )
     
-    recipient_emails = [u['email'] for u in users if u['email']]
+    recipient_emails = [u['email'] for u in users if u['email'] and (
+        not subscriptions.get(u['id']) or (group_id and group_id in subscriptions.get(u['id'], []))
+    )]
     if not recipient_emails:
         return
     
@@ -474,6 +492,43 @@ def get_users_with_preference(preference_key: str) -> List[Dict[str, Any]]:
             })
     
     return users_with_pref
+
+
+def get_group_subscriptions(preference_key: str) -> Dict[int, List[int]]:
+    """Get group subscription mapping for users by preference key."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT user_id, group_id FROM user_group_subscriptions WHERE preference_key = ?",
+        (preference_key,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    mapping: Dict[int, List[int]] = {}
+    for row in rows:
+        mapping.setdefault(row['user_id'], []).append(row['group_id'])
+    return mapping
+
+
+def get_printer_group_id_by_ip(printer_ip: str) -> Optional[int]:
+    """Get group ID for a printer by IP (if assigned)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM printers WHERE ip = ?", (printer_ip,))
+    printer_row = cursor.fetchone()
+    if not printer_row:
+        conn.close()
+        return None
+
+    printer_id = printer_row['id']
+    cursor.execute(
+        "SELECT group_id FROM printer_group_members WHERE printer_id = ?",
+        (printer_id,)
+    )
+    group_row = cursor.fetchone()
+    conn.close()
+    return group_row['group_id'] if group_row else None
 
 
 def notify_user_login(username: str, ip_address: str, user_agent: str, user_id: int):
@@ -710,54 +765,121 @@ def send_weekly_report():
     if not users:
         logger.info("No users have weekly reports enabled, skipping")
         return
-    
-    # Gather statistics for the past 7 days
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Get printer count
+
+    subscriptions = get_group_subscriptions('weekly_reports')
+
     from app.printers import get_registry
     registry = get_registry()
-    total_printers = len(registry.get_all())
-    online_printers = sum(1 for p in registry.get_all_statuses() if p.get('is_online', False))
-    
-    # Get job stats from last 7 days
-    cursor.execute("""
-        SELECT COUNT(*) as job_count, COALESCE(SUM(pages), 0) as total_pages
-        FROM print_job_history
-        WHERE recorded_at >= datetime('now', '-7 days')
-    """)
-    job_row = cursor.fetchone()
-    job_count = job_row['job_count'] if job_row else 0
-    total_pages = job_row['total_pages'] if job_row else 0
-    
-    # Get redirects count
-    cursor.execute("SELECT COUNT(*) as redirect_count FROM active_redirects")
-    redirect_row = cursor.fetchone()
-    redirect_count = redirect_row['redirect_count'] if redirect_row else 0
-    
-    # Get recent audit events
-    cursor.execute("""
-        SELECT action, timestamp, username, details
-        FROM audit_log
-        WHERE timestamp >= datetime('now', '-7 days')
-        AND action IN ('REDIRECT_CREATED', 'REDIRECT_REMOVED', 'PRINTER_ADDED', 'PRINTER_REMOVED')
-        ORDER BY timestamp DESC
-        LIMIT 10
-    """)
-    recent_events = cursor.fetchall()
-    
-    conn.close()
-    
-    # Build email
-    week_start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-    week_end = datetime.now().strftime('%Y-%m-%d')
-    
-    subject = f"Printer Proxy Weekly Report ({week_start} to {week_end})"
-    
-    message = f"""
+    all_printers = registry.get_all()
+    all_statuses = registry.get_all_statuses()
+
+    settings = get_settings_manager().get_all()
+    if not settings.get('notifications', {}).get('smtp', {}).get('enabled'):
+        return
+
+    channel = SMTPNotificationChannel()
+    if not channel.is_configured(settings):
+        return
+
+    for user in users:
+        email = user.get('email')
+        if not email:
+            continue
+
+        group_ids = subscriptions.get(user['id'], [])
+        printer_ids = None
+        if group_ids:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(group_ids))
+            cursor.execute(
+                f"SELECT printer_id FROM printer_group_members WHERE group_id IN ({placeholders})",
+                group_ids
+            )
+            printer_rows = cursor.fetchall()
+            conn.close()
+            printer_ids = [row['printer_id'] for row in printer_rows]
+
+        if printer_ids is not None:
+            filtered_printers = [p for p in all_printers if p.id in printer_ids]
+            filtered_statuses = [s for s in all_statuses if s.get('printer', {}).get('id') in printer_ids]
+        else:
+            filtered_printers = all_printers
+            filtered_statuses = all_statuses
+
+        total_printers = len(filtered_printers)
+        online_printers = sum(1 for p in filtered_statuses if p.get('is_online', False))
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if printer_ids is not None and printer_ids:
+            placeholders = ",".join(["?"] * len(printer_ids))
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) as job_count, COALESCE(SUM(pages), 0) as total_pages
+                FROM print_job_history
+                WHERE recorded_at >= datetime('now', '-7 days')
+                AND printer_id IN ({placeholders})
+                """,
+                printer_ids
+            )
+        else:
+            cursor.execute("""
+                SELECT COUNT(*) as job_count, COALESCE(SUM(pages), 0) as total_pages
+                FROM print_job_history
+                WHERE recorded_at >= datetime('now', '-7 days')
+            """)
+        job_row = cursor.fetchone()
+        job_count = job_row['job_count'] if job_row else 0
+        total_pages = job_row['total_pages'] if job_row else 0
+
+        if printer_ids is not None and printer_ids:
+            placeholders = ",".join(["?"] * len(printer_ids))
+            cursor.execute(
+                f"SELECT COUNT(*) as redirect_count FROM active_redirects WHERE source_printer_id IN ({placeholders})",
+                printer_ids
+            )
+        else:
+            cursor.execute("SELECT COUNT(*) as redirect_count FROM active_redirects")
+        redirect_row = cursor.fetchone()
+        redirect_count = redirect_row['redirect_count'] if redirect_row else 0
+
+        if printer_ids is not None and printer_ids:
+            placeholders = ",".join(["?"] * len(printer_ids))
+            cursor.execute(
+                f"""
+                SELECT action, timestamp, username, details
+                FROM audit_log
+                WHERE timestamp >= datetime('now', '-7 days')
+                AND (source_printer_id IN ({placeholders}) OR target_printer_id IN ({placeholders}))
+                ORDER BY timestamp DESC
+                LIMIT 10
+                """,
+                (*printer_ids, *printer_ids)
+            )
+        else:
+            cursor.execute("""
+                SELECT action, timestamp, username, details
+                FROM audit_log
+                WHERE timestamp >= datetime('now', '-7 days')
+                AND action IN ('REDIRECT_CREATED', 'REDIRECT_REMOVED', 'PRINTER_ADDED', 'PRINTER_REMOVED')
+                ORDER BY timestamp DESC
+                LIMIT 10
+            """)
+        recent_events = cursor.fetchall()
+        conn.close()
+
+        week_start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        week_end = datetime.now().strftime('%Y-%m-%d')
+
+        scope_label = "All Printers" if printer_ids is None else "Group Scope"
+        subject = f"Printer Proxy Weekly Report ({week_start} to {week_end})"
+
+        message = f"""
 Printer Proxy Weekly Report
 Period: {week_start} to {week_end}
+Scope: {scope_label}
 
 === Summary ===
 Total Printers: {total_printers}
@@ -771,107 +893,95 @@ Total Pages: {total_pages:,}
 
 === Recent Activity ===
 """
-    
-    if recent_events:
-        for event in recent_events:
-            event_time = event['timestamp'][:19] if event['timestamp'] else 'Unknown'
-            message += f"\n{event_time} - {event['action']} by {event['username']}"
-            if event['details']:
-                message += f" ({event['details']})"
-    else:
-        message += "\nNo significant events this week."
-    
-    # HTML version with event list
-    events_html = ""
-    if recent_events:
-        for event in recent_events:
-            event_time = event['timestamp'][:19] if event['timestamp'] else 'Unknown'
-            events_html += f"""
-            <tr>
-                <td style="padding: 8px; border: 1px solid #ddd;">{event_time}</td>
-                <td style="padding: 8px; border: 1px solid #ddd;">{event['action']}</td>
-                <td style="padding: 8px; border: 1px solid #ddd;">{event['username']}</td>
-                <td style="padding: 8px; border: 1px solid #ddd;">{event['details'] or '—'}</td>
-            </tr>
-            """
-    else:
-        events_html = '<tr><td colspan="4" style="padding: 8px; text-align: center; color: #888;">No significant events this week</td></tr>'
-    
-    html_message = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 20px;">
-        <h2 style="color: #333;">Printer Proxy Weekly Report</h2>
-        <p style="color: #666;">Period: {week_start} to {week_end}</p>
-        
-        <h3 style="color: #333; margin-top: 30px;">Summary</h3>
-        <table style="border-collapse: collapse; margin: 10px 0; width: 100%;">
-            <tr>
-                <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa; width: 200px;"><strong>Total Printers</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd;">{total_printers}</td>
-            </tr>
-            <tr>
-                <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Online Printers</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd; color: #28a745;">{online_printers}</td>
-            </tr>
-            <tr>
-                <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Offline Printers</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd; color: #dc3545;">{total_printers - online_printers}</td>
-            </tr>
-            <tr>
-                <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Active Redirects</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd;">{redirect_count}</td>
-            </tr>
-        </table>
-        
-        <h3 style="color: #333; margin-top: 30px;">Print Statistics</h3>
-        <table style="border-collapse: collapse; margin: 10px 0; width: 100%;">
-            <tr>
-                <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa; width: 200px;"><strong>Total Jobs</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd;">{job_count:,}</td>
-            </tr>
-            <tr>
-                <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Total Pages</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd;">{total_pages:,}</td>
-            </tr>
-        </table>
-        
-        <h3 style="color: #333; margin-top: 30px;">Recent Activity</h3>
-        <table style="border-collapse: collapse; margin: 10px 0; width: 100%;">
-            <thead>
-                <tr style="background: #f8f9fa;">
-                    <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Time</th>
-                    <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Action</th>
-                    <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">User</th>
-                    <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Details</th>
+
+        if recent_events:
+            for event in recent_events:
+                event_time = event['timestamp'][:19] if event['timestamp'] else 'Unknown'
+                message += f"\n{event_time} - {event['action']} by {event['username']}"
+                if event['details']:
+                    message += f" ({event['details']})"
+        else:
+            message += "\nNo significant events this week."
+
+        events_html = ""
+        if recent_events:
+            for event in recent_events:
+                event_time = event['timestamp'][:19] if event['timestamp'] else 'Unknown'
+                events_html += f"""
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{event_time}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{event['action']}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{event['username']}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{event['details'] or '—'}</td>
                 </tr>
-            </thead>
-            <tbody>
-                {events_html}
-            </tbody>
-        </table>
-        
-        <hr style="margin: 30px 0; border: 1px solid #eee;">
-        <p style="color: #888; font-size: 12px;">
-            This is an automated weekly report from Printer Proxy.<br>
-            You can disable these reports in your notification preferences.
-        </p>
-    </body>
-    </html>
-    """
-    
-    recipient_emails = [u['email'] for u in users if u['email']]
-    if not recipient_emails:
-        logger.info("No users with email addresses have weekly reports enabled")
-        return
-    
-    logger.info(f"Sending weekly report to {len(recipient_emails)} user(s)")
-    
-    # Send via SMTP to users with weekly_reports enabled
-    settings = get_settings_manager().get_all()
-    if settings.get('notifications', {}).get('smtp', {}).get('enabled'):
-        channel = SMTPNotificationChannel()
-        if channel.is_configured(settings):
-            channel.send(subject, message, settings, html_message, recipient_emails=recipient_emails)
+                """
+        else:
+            events_html = '<tr><td colspan="4" style="padding: 8px; text-align: center; color: #888;">No significant events this week</td></tr>'
+
+        html_message = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #333;">Printer Proxy Weekly Report</h2>
+            <p style="color: #666;">Period: {week_start} to {week_end}</p>
+            <p style="color: #666;">Scope: {scope_label}</p>
+            
+            <h3 style="color: #333; margin-top: 30px;">Summary</h3>
+            <table style="border-collapse: collapse; margin: 10px 0; width: 100%;">
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa; width: 200px;"><strong>Total Printers</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{total_printers}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Online Printers</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd; color: #28a745;">{online_printers}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Offline Printers</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd; color: #dc3545;">{total_printers - online_printers}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Active Redirects</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{redirect_count}</td>
+                </tr>
+            </table>
+            
+            <h3 style="color: #333; margin-top: 30px;">Print Statistics</h3>
+            <table style="border-collapse: collapse; margin: 10px 0; width: 100%;">
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa; width: 200px;"><strong>Total Jobs</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{job_count:,}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Total Pages</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{total_pages:,}</td>
+                </tr>
+            </table>
+            
+            <h3 style="color: #333; margin-top: 30px;">Recent Activity</h3>
+            <table style="border-collapse: collapse; margin: 10px 0; width: 100%;">
+                <thead>
+                    <tr style="background: #f8f9fa;">
+                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Time</th>
+                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Action</th>
+                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">User</th>
+                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {events_html}
+                </tbody>
+            </table>
+            
+            <hr style="margin: 30px 0; border: 1px solid #eee;">
+            <p style="color: #888; font-size: 12px;">
+                This is an automated weekly report from Printer Proxy.<br>
+                You can disable these reports in your notification preferences.
+            </p>
+        </body>
+        </html>
+        """
+
+        channel.send(subject, message, settings, html_message, recipient_emails=[email])
 
 
 class WeeklyReportScheduler:

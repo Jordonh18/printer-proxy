@@ -260,6 +260,15 @@ class JobMonitor:
                 result = loop.run_until_complete(query())
                 return result
             finally:
+                try:
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception:
+                    pass
                 loop.close()
                 
         except Exception as e:

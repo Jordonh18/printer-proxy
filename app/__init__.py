@@ -109,6 +109,14 @@ def create_app() -> Flask:
         # Start the weekly report scheduler
         from app.notifications import start_weekly_reports
         start_weekly_reports()
+
+        # Start group redirect scheduler
+        from app.group_redirect_scheduler import init_group_redirect_scheduler
+        init_group_redirect_scheduler(start_background=True)
+
+        # Start printer redirect scheduler
+        from app.printer_redirect_scheduler import init_printer_redirect_scheduler
+        init_printer_redirect_scheduler(start_background=True)
     
     # Setup logging
     setup_logging(app)

@@ -35,6 +35,10 @@ export interface Printer {
 
 export interface PrinterStatus {
   printer: Printer;
+  group?: {
+    id: number;
+    name: string;
+  } | null;
   status?: {
     icmp_reachable: boolean;
     tcp_reachable: boolean;
@@ -81,6 +85,23 @@ export interface ActiveRedirect {
   port: number;
   enabled_at: string;
   enabled_by: string;
+}
+
+export interface PrinterRedirectSchedule {
+  id: number;
+  source_printer_id: string;
+  source_printer_name?: string;
+  target_printer_id: string;
+  target_printer_name?: string;
+  start_at: string;
+  end_at?: string | null;
+  enabled: boolean;
+  is_active: boolean;
+  last_activated_at?: string | null;
+  last_deactivated_at?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 // Audit log types
@@ -166,5 +187,20 @@ export interface TokenPermissions {
   permissions: string[];
   grouped: Record<string, string[]>;
   all_scopes: Record<string, string[]>;
+}
+
+export interface PrinterGroup {
+  id: number;
+  name: string;
+  description?: string | null;
+  printer_count: number;
+  owner_user_id?: number | null;
+  owner_username?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PrinterGroupDetail extends PrinterGroup {
+  printer_ids: string[];
 }
 

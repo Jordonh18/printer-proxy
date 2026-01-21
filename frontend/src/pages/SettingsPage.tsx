@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { authApi } from '@/lib/api';
+import { authApi, notificationSubscriptionsApi, printerGroupsApi } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -40,6 +41,12 @@ export function SettingsPage() {
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
   const [notificationError, setNotificationError] = useState('');
+  const [groupSubscriptionPrefs, setGroupSubscriptionPrefs] = useState({
+    offlineAlerts: [] as number[],
+    weeklyReports: [] as number[],
+  });
+  const [restrictOfflineAlerts, setRestrictOfflineAlerts] = useState(false);
+  const [restrictWeeklyReports, setRestrictWeeklyReports] = useState(false);
   const [accountForm, setAccountForm] = useState({
     username: '',
     email: '',
@@ -87,6 +94,17 @@ export function SettingsPage() {
     queryFn: authApi.getNotificationPreferences,
   });
 
+  const { data: notificationSubscriptionsData } = useQuery({
+    queryKey: ['auth', 'notification-subscriptions'],
+    queryFn: () => notificationSubscriptionsApi.get(),
+  });
+
+  const { data: printerGroupsData } = useQuery({
+    queryKey: ['printer-groups'],
+    queryFn: printerGroupsApi.getAll,
+    enabled: activeTab === 'notifications',
+  });
+
   const { data: sessions, refetch: refetchSessions, isLoading: isSessionsLoading } = useQuery({
     queryKey: ['auth', 'sessions'],
     queryFn: authApi.getSessions,
@@ -103,6 +121,19 @@ export function SettingsPage() {
       });
     }
   }, [notificationPrefsData]);
+
+  useEffect(() => {
+    if (!notificationSubscriptionsData) return;
+    const subscriptions = notificationSubscriptionsData.subscriptions || {};
+    const offlineAlerts = subscriptions.offline_alerts || [];
+    const weeklyReports = subscriptions.weekly_reports || [];
+    setGroupSubscriptionPrefs({
+      offlineAlerts,
+      weeklyReports,
+    });
+    setRestrictOfflineAlerts(offlineAlerts.length > 0);
+    setRestrictWeeklyReports(weeklyReports.length > 0);
+  }, [notificationSubscriptionsData]);
 
   const canCloseRecoveryModal = recoveryCopied || recoveryDownloaded;
 
@@ -154,6 +185,22 @@ export function SettingsPage() {
   };
 
   const activeMeta = tabMeta[activeTab] ?? tabMeta.account;
+  const groupOptions = printerGroupsData?.groups ?? [];
+
+  const updateGroupSubscriptions = async (preference: 'offline_alerts' | 'weekly_reports', groupIds: number[]) => {
+    setIsSavingNotifications(true);
+    setNotificationError('');
+    setNotificationMessage('');
+    try {
+      await notificationSubscriptionsApi.update(preference, groupIds);
+      setNotificationMessage('Notification group scope updated');
+      setTimeout(() => setNotificationMessage(''), 3000);
+    } catch (err) {
+      setNotificationError('Failed to update notification scope');
+    } finally {
+      setIsSavingNotifications(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -877,6 +924,106 @@ export function SettingsPage() {
                       }
                     }}
                   />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Group notification scope</CardTitle>
+              <CardDescription>Limit alerts and reports to the groups you care about.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Offline alerts</p>
+                    <p className="text-xs text-muted-foreground">Only receive offline alerts for selected groups.</p>
+                  </div>
+                  <Switch
+                    checked={restrictOfflineAlerts}
+                    disabled={isSavingNotifications}
+                    onCheckedChange={async (value) => {
+                      const nextGroups = value
+                        ? (groupSubscriptionPrefs.offlineAlerts.length
+                          ? groupSubscriptionPrefs.offlineAlerts
+                          : groupOptions.map((group) => group.id))
+                        : [];
+                      setRestrictOfflineAlerts(value);
+                      setGroupSubscriptionPrefs((prev) => ({
+                        ...prev,
+                        offlineAlerts: nextGroups,
+                      }));
+                      await updateGroupSubscriptions('offline_alerts', nextGroups);
+                    }}
+                  />
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {groupOptions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No printer groups available.</p>
+                  ) : groupOptions.map((group) => (
+                    <label key={group.id} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={groupSubscriptionPrefs.offlineAlerts.includes(group.id)}
+                        disabled={!restrictOfflineAlerts || isSavingNotifications}
+                        onCheckedChange={async (checked) => {
+                          const next = checked
+                            ? [...groupSubscriptionPrefs.offlineAlerts, group.id]
+                            : groupSubscriptionPrefs.offlineAlerts.filter((id) => id !== group.id);
+                          setGroupSubscriptionPrefs((prev) => ({ ...prev, offlineAlerts: next }));
+                          await updateGroupSubscriptions('offline_alerts', next);
+                        }}
+                      />
+                      <span>{group.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Weekly reports</p>
+                    <p className="text-xs text-muted-foreground">Scope weekly reports to selected groups.</p>
+                  </div>
+                  <Switch
+                    checked={restrictWeeklyReports}
+                    disabled={isSavingNotifications}
+                    onCheckedChange={async (value) => {
+                      const nextGroups = value
+                        ? (groupSubscriptionPrefs.weeklyReports.length
+                          ? groupSubscriptionPrefs.weeklyReports
+                          : groupOptions.map((group) => group.id))
+                        : [];
+                      setRestrictWeeklyReports(value);
+                      setGroupSubscriptionPrefs((prev) => ({
+                        ...prev,
+                        weeklyReports: nextGroups,
+                      }));
+                      await updateGroupSubscriptions('weekly_reports', nextGroups);
+                    }}
+                  />
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {groupOptions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No printer groups available.</p>
+                  ) : groupOptions.map((group) => (
+                    <label key={group.id} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={groupSubscriptionPrefs.weeklyReports.includes(group.id)}
+                        disabled={!restrictWeeklyReports || isSavingNotifications}
+                        onCheckedChange={async (checked) => {
+                          const next = checked
+                            ? [...groupSubscriptionPrefs.weeklyReports, group.id]
+                            : groupSubscriptionPrefs.weeklyReports.filter((id) => id !== group.id);
+                          setGroupSubscriptionPrefs((prev) => ({ ...prev, weeklyReports: next }));
+                          await updateGroupSubscriptions('weekly_reports', next);
+                        }}
+                      />
+                      <span>{group.name}</span>
+                    </label>
+                  ))}
                 </div>
               </div>
             </CardContent>
