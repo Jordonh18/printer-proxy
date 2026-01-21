@@ -16,6 +16,7 @@ from app.models import AuditLog, ActiveRedirect, GroupRedirectSchedule, PrinterR
 from app.auth import authenticate_user, validate_password_strength, hash_password, verify_password
 from app.api_tokens import get_available_permissions
 from app.notification_manager import get_notification_manager
+from app.workflow_engine import get_workflow_engine
 import queue
 from app.printers import get_registry, Printer
 from app.printer_stats import get_printer_stats
@@ -86,7 +87,7 @@ def api_auth_required(fn):
             verify_jwt_in_request()
             user_id = get_jwt_identity()
             claims = get_jwt()
-            user = User.get_by_id(int(user_id)) if user_id is not None else None
+            user = User.get_by_id(user_id) if user_id is not None else None
             if user and user.is_active:
                 jti = claims.get('jti')
                 if not jti:
@@ -337,18 +338,18 @@ def api_workflows_create():
     return jsonify(workflow), 201
 
 
-@api_bp.route('/workflows/<int:workflow_id>', methods=['GET'])
+@api_bp.route('/workflows/<workflow_id>', methods=['GET'])
 @api_auth_required
-def api_workflows_get(workflow_id: int):
+def api_workflows_get(workflow_id: str):
     workflow = Workflow.get_by_id(workflow_id)
     if not workflow:
-        return jsonify({'error': 'Workflow not found'}), 404
+        return jsonify({'error': 'Invalid workflow ID.'}), 404
     return jsonify(workflow)
 
 
-@api_bp.route('/workflows/<int:workflow_id>', methods=['PUT'])
+@api_bp.route('/workflows/<workflow_id>', methods=['PUT'])
 @api_role_required('admin', 'operator')
-def api_workflows_update(workflow_id: int):
+def api_workflows_update(workflow_id: str):
     data = request.get_json() or {}
     workflow = Workflow.update(
         workflow_id,
@@ -361,21 +362,51 @@ def api_workflows_update(workflow_id: int):
     )
     if not workflow:
         return jsonify({'error': 'Workflow not found'}), 404
+    
+    # Update scheduler if workflow has schedule trigger
+    try:
+        from app.workflow_scheduler import get_workflow_scheduler
+        import json
+        
+        # workflow['nodes'] is already parsed by get_by_id()
+        nodes = workflow.get('nodes', [])
+        schedule_node = next((n for n in nodes if n['type'] == 'trigger.schedule'), None)
+        
+        scheduler = get_workflow_scheduler()
+        
+        if schedule_node and workflow.get('is_active'):
+            # Schedule or reschedule the workflow
+            schedule_config = schedule_node.get('properties', {})
+            scheduler.schedule_workflow(workflow_id, schedule_config)
+        else:
+            # Unschedule if no schedule trigger or disabled
+            scheduler.unschedule_workflow(workflow_id)
+    except Exception as e:
+        current_app.logger.error(f"Error updating workflow schedule: {e}")
+    
     return jsonify(workflow)
 
 
-@api_bp.route('/workflows/<int:workflow_id>', methods=['DELETE'])
+@api_bp.route('/workflows/<workflow_id>', methods=['DELETE'])
 @api_role_required('admin', 'operator')
-def api_workflows_delete(workflow_id: int):
+def api_workflows_delete(workflow_id: str):
+    # Unschedule before deleting
+    try:
+        from app.workflow_scheduler import get_workflow_scheduler
+        scheduler = get_workflow_scheduler()
+        scheduler.unschedule_workflow(workflow_id)
+    except Exception as e:
+        current_app.logger.error(f"Error unscheduling workflow: {e}")
+    
     deleted = Workflow.delete(workflow_id)
     if not deleted:
         return jsonify({'error': 'Workflow not found'}), 404
     return jsonify({'status': 'deleted'})
 
 
-@api_bp.route('/workflows/<int:workflow_id>/validate-connection', methods=['POST'])
+@api_bp.route('/workflows/<workflow_id>/validate-connection', methods=['POST'])
 @api_role_required('admin', 'operator')
-def api_workflows_validate_connection(workflow_id: int):
+def api_workflows_validate_connection(workflow_id: str):
     data = request.get_json() or {}
     source_node_id = data.get('source_node_id')
     target_node_id = data.get('target_node_id')
@@ -643,6 +674,8 @@ def api_auth_setup():
     
     username = data.get('username', '').strip()
     password = data.get('password', '')
+    email = data.get('email')
+    full_name = data.get('full_name')
     
     if not username:
         return jsonify({'error': 'Username is required'}), 400
@@ -2322,3 +2355,72 @@ def api_password_requirements():
         'require_special': PASSWORD_REQUIRE_SPECIAL
     })
 
+
+# ========== Workflow Webhook Endpoints ==========
+
+@api_bp.route('/webhooks/workflows/<workflow_id>/<path:hook_id>', methods=['POST'])
+def workflow_webhook_trigger(workflow_id, hook_id):
+    """
+    Webhook endpoint to trigger workflow execution.
+    Verifies signature and executes the workflow.
+    """
+    try:
+        # Get workflow and verify it has webhook trigger
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, name, nodes, enabled FROM workflows WHERE id = ?",
+            (workflow_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({'error': 'Workflow not found'}), 404
+        
+        if not row[3]:  # enabled check
+            return jsonify({'error': 'Workflow is disabled'}), 403
+        
+        nodes = json.loads(row[2]) if row[2] else []
+        
+        # Find webhook trigger node and verify hook_id matches
+        webhook_node = None
+        for node in nodes:
+            if node['type'] == 'trigger.webhook':
+                node_path = node.get('properties', {}).get('path', '')
+                if hook_id in node_path:
+                    webhook_node = node
+                    break
+        
+        if not webhook_node:
+            return jsonify({'error': 'Invalid webhook path'}), 404
+        
+        # Verify signature (secret is pre-hashed SHA256)
+        secret = webhook_node.get('properties', {}).get('secret', '')
+        signature = request.headers.get('X-Signature')
+        
+        if secret:
+            if not signature:
+                return jsonify({'error': 'Missing X-Signature header'}), 401
+            if signature != secret:
+                return jsonify({'error': 'Invalid signature'}), 401
+        
+        # Execute workflow
+        context = {
+            'trigger': 'webhook',
+            'workflow_id': workflow_id,
+            'payload': request.get_json(silent=True) or {},
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        engine = get_workflow_engine()
+        success = engine.execute_workflow(workflow_id, context)
+        
+        if success:
+            return jsonify({'message': 'Workflow executed successfully'}), 200
+        else:
+            return jsonify({'error': 'Workflow execution failed'}), 500
+            
+    except Exception as e:
+        current_app.logger.error(f"Webhook error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500

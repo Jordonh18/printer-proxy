@@ -117,6 +117,10 @@ def create_app() -> Flask:
         # Start printer redirect scheduler
         from app.printer_redirect_scheduler import init_printer_redirect_scheduler
         init_printer_redirect_scheduler(start_background=True)
+        
+        # Start workflow scheduler
+        from app.workflow_scheduler import reload_workflow_schedules
+        reload_workflow_schedules()
     
     # Setup logging
     setup_logging(app)

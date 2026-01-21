@@ -282,6 +282,18 @@ class HealthCheckScheduler:
                                 notify_printer_offline(printer.name, printer.ip)
                             except Exception as e:
                                 logger.error(f"Failed to send offline notification: {e}")
+                            
+                            # Trigger workflows for printer offline
+                            from app.workflow_engine import trigger_workflows_for_event
+                            try:
+                                trigger_workflows_for_event('printer_offline', {
+                                    'printer_id': printer.id,
+                                    'printer_name': printer.name,
+                                    'printer_ip': printer.ip,
+                                    'printer_state': 'offline'
+                                })
+                            except Exception as e:
+                                logger.error(f"Failed to trigger workflows: {e}")
                     else:
                         # Printer is online - send recovery notification if it was offline before
                         if previous_status and not was_online:
@@ -290,6 +302,18 @@ class HealthCheckScheduler:
                                 notify_printer_online(printer.name, printer.ip)
                             except Exception as e:
                                 logger.error(f"Failed to send online notification: {e}")
+                            
+                            # Trigger workflows for printer online
+                            from app.workflow_engine import trigger_workflows_for_event
+                            try:
+                                trigger_workflows_for_event('printer_online', {
+                                    'printer_id': printer.id,
+                                    'printer_name': printer.name,
+                                    'printer_ip': printer.ip,
+                                    'printer_state': 'online'
+                                })
+                            except Exception as e:
+                                logger.error(f"Failed to trigger workflows: {e}")
                     
                 except Exception as e:
                     logger.error(f"Error checking printer {printer.id}: {e}")

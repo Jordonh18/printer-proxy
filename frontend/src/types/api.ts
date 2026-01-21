@@ -266,7 +266,7 @@ export interface WorkflowEdge {
 }
 
 export interface Workflow {
-  id: number;
+  id: string;
   name: string;
   description?: string | null;
   is_active: boolean;

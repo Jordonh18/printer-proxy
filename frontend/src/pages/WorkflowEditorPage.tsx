@@ -33,6 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { printersApi, workflowApi } from '@/lib/api';
 import { toast } from '@/lib/toast';
@@ -49,7 +50,7 @@ const GRID_SIZE: [number, number] = [20, 20];
 
 export function WorkflowEditorPage() {
   const { id } = useParams();
-  const workflowId = Number(id);
+  const workflowId = id;
   const navigate = useNavigate();
   const { user } = useAuth();
   const canEdit = user?.role !== 'viewer';
@@ -61,8 +62,11 @@ export function WorkflowEditorPage() {
 
   const { data: workflow, isLoading } = useQuery({
     queryKey: ['workflow', workflowId],
-    queryFn: () => workflowApi.getById(workflowId),
-    enabled: Number.isFinite(workflowId),
+    queryFn: () => {
+      if (!workflowId) throw new Error('No workflow ID');
+      return workflowApi.getById(workflowId);
+    },
+    enabled: !!workflowId,
   });
 
   const { data: printers = [] } = useQuery({
@@ -106,6 +110,7 @@ export function WorkflowEditorPage() {
 
   const nodesRef = useRef<Node<WorkflowNodeData>[]>([]);
   const edgesRef = useRef<Edge[]>([]);
+  const deleteNodeByIdRef = useRef<(nodeId: string) => void>(() => {});
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -146,6 +151,9 @@ export function WorkflowEditorPage() {
       return;
     }
 
+    // Suppress dirty marking during initial load - the change handlers fire after we set nodes/edges
+    suppressDirtyRef.current = true;
+
     const mappedNodes: Node<WorkflowNodeData>[] = (workflow.nodes || []).map((node) => {
       const registryNode = registryMap[node.type];
       return {
@@ -166,6 +174,7 @@ export function WorkflowEditorPage() {
           showHandles: canEdit,
           compatible: true,
           draggingActive: false,
+          onDelete: () => deleteNodeByIdRef.current(node.id),
         } as WorkflowNodeData & { registryKey: string },
       };
     });
@@ -191,20 +200,18 @@ export function WorkflowEditorPage() {
     setEdges(mappedEdges);
     setUiState(workflow.ui_state || null);
     setIsDirty(false);
-  }, [workflow, registryMap, setNodes, setEdges, canEdit]);
 
-  // Inject onDelete handler into node data
+    // Re-enable dirty marking after a short delay to allow React Flow to process
+    requestAnimationFrame(() => {
+      suppressDirtyRef.current = false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflow?.id, registryMap, canEdit]);
+
+  // Keep deleteNodeByIdRef in sync with deleteNodeById
   useEffect(() => {
-    setNodes((currentNodes) =>
-      currentNodes.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          onDelete: () => deleteNodeById(node.id),
-        },
-      }))
-    );
-  }, [deleteNodeById, setNodes]);
+    deleteNodeByIdRef.current = deleteNodeById;
+  }, [deleteNodeById]);
 
   const handleUndo = () => {
     const previous = history.current.pop();
@@ -451,7 +458,7 @@ export function WorkflowEditorPage() {
     markDirty();
   };
 
-  const handleAddNode = (registryNode: WorkflowRegistryNode, position?: { x: number; y: number }) => {
+  const handleAddNode = async (registryNode: WorkflowRegistryNode, position?: { x: number; y: number }) => {
     if (!canEdit) {
       toast.warning('Viewer access is read-only');
       return;
@@ -463,9 +470,11 @@ export function WorkflowEditorPage() {
     const generatedProperties = { ...(registryNode.default_properties || {}) };
     if (registryNode.key === 'trigger.webhook') {
       const generatedId = crypto.randomUUID();
-      generatedProperties.path = `/webhooks/workflows/${workflowId}/${generatedId}`;
-      const secretBytes = crypto.getRandomValues(new Uint8Array(16));
-      generatedProperties.secret = Array.from(secretBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+      generatedProperties.path = `/api/webhooks/workflows/${workflowId}/${generatedId}`;
+      // Generate secret as SHA256 hash
+      const randomBytes = crypto.getRandomValues(new Uint8Array(32));
+      const hashBuffer = await crypto.subtle.digest('SHA-256', randomBytes);
+      generatedProperties.secret = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, '0')).join('');
     }
     pushHistory();
     const id = `node_${Date.now()}`;
@@ -483,7 +492,7 @@ export function WorkflowEditorPage() {
         outputs: registryNode.outputs || [],
         properties: generatedProperties,
         registryKey: registryNode.key,
-        onDelete: () => deleteNodeById(id),
+        onDelete: () => deleteNodeByIdRef.current(id),
         canEdit,
       } as WorkflowNodeData & { registryKey: string },
     };
@@ -568,22 +577,33 @@ export function WorkflowEditorPage() {
     }
   }, [workflow, isDirty, serializeWorkflow]);
 
+  // Autosave effect - debounce changes
   useEffect(() => {
-    if (!workflow || !canEdit) {
+    if (!workflow || !canEdit || !isDirty) {
       return;
     }
     const timeout = setTimeout(() => {
-      handleAutosave();
+      // Call autosave directly instead of using handleAutosave callback
+      const payload = serializeWorkflow();
+      workflowApi.update(workflow.id, payload)
+        .then(() => setIsDirty(false))
+        .catch((error) => {
+          toast.error('Autosave failed', error instanceof Error ? error.message : undefined);
+        });
     }, 8000);
     return () => clearTimeout(timeout);
-  }, [nodes, edges, uiState, workflow, canEdit, handleAutosave]);
+  }, [nodes, edges, uiState, workflow, canEdit, isDirty, serializeWorkflow]);
 
-  if (!Number.isFinite(workflowId)) {
+  if (!workflowId) {
     return <div className="text-sm text-muted-foreground">Invalid workflow ID.</div>;
   }
 
   if (isLoading || !workflow) {
-    return <div className="text-sm text-muted-foreground">Loading workflow...</div>;
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
   }
 
   return (
@@ -704,7 +724,7 @@ export function WorkflowEditorPage() {
           />
         </div>
 
-        <div className="h-full w-full" onDrop={handleDrop} onDragOver={handleDragOver}>
+        <div className="h-full w-full" onDrop={handleDrop} onDragOver={handleDragOver} style={{ height: 'calc(100vh - 4rem)' }}>
           <ReactFlow
             nodes={nodes}
             edges={edges}

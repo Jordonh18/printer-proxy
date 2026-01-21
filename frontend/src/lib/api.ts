@@ -289,7 +289,7 @@ export const workflowApi = {
     return response.data;
   },
 
-  getById: async (id: number): Promise<Workflow> => {
+  getById: async (id: string): Promise<Workflow> => {
     const response = await api.get(`/workflows/${id}`);
     return response.data;
   },
@@ -299,7 +299,7 @@ export const workflowApi = {
     return response.data;
   },
 
-  update: async (id: number, data: {
+  update: async (id: string, data: {
     name?: string;
     description?: string;
     is_active?: boolean;
@@ -311,12 +311,12 @@ export const workflowApi = {
     return response.data;
   },
 
-  delete: async (id: number): Promise<{ status: string }> => {
+  delete: async (id: string): Promise<{ status: string }> => {
     const response = await api.delete(`/workflows/${id}`);
     return response.data;
   },
 
-  validateConnection: async (id: number, data: {
+  validateConnection: async (id: string, data: {
     source_node_id: string;
     target_node_id: string;
     source_handle?: string | null;

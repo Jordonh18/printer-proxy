@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 import json
+import uuid
 
 from config.config import DATABASE_PATH, DATA_DIR
 
@@ -24,6 +25,237 @@ def get_db_connection() -> sqlite3.Connection:
     conn.execute('PRAGMA temp_store=MEMORY')
     
     return conn
+
+
+def _seed_example_workflows(cursor):
+    """Seed database with example workflows."""
+    
+    # Example 1: Printer Offline Alert
+    wf1_id = uuid.uuid4().hex
+    wf1_webhook_id = uuid.uuid4().hex
+    wf1_webhook_secret = uuid.uuid4().hex
+    
+    workflow1 = {
+        'id': wf1_id,
+        'name': 'Printer Offline Alert',
+        'description': 'Send email notification when a printer goes offline',
+        'enabled': 1,
+        'nodes': [
+            {
+                'id': 'node_trigger',
+                'type': 'trigger.health_change',
+                'label': 'Printer Goes Offline',
+                'position': {'x': 100, 'y': 100},
+                'properties': {
+                    'state': 'offline',
+                    'printer_id': '',  # Any printer
+                    'description': 'Triggers when any printer goes offline'
+                }
+            },
+            {
+                'id': 'node_email',
+                'type': 'action.notify.email',
+                'label': 'Send Email Alert',
+                'position': {'x': 400, 'y': 100},
+                'properties': {
+                    'to': 'admin@example.com',
+                    'subject': 'Printer {{printer_name}} is Offline',
+                    'message': 'Printer {{printer_name}} ({{printer_ip}}) went offline at {{timestamp}}'
+                }
+            }
+        ],
+        'edges': [
+            {
+                'id': 'edge_1',
+                'source': 'node_trigger',
+                'target': 'node_email',
+                'sourceHandle': 'out',
+                'targetHandle': 'in'
+            }
+        ],
+        'ui_state': {},
+        'created_by': 'system',
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat()
+    }
+    
+    # Example 2: Auto-Redirect on Failure
+    wf2_id = uuid.uuid4().hex
+    
+    workflow2 = {
+        'id': wf2_id,
+        'name': 'Auto-Redirect on Printer Failure',
+        'description': 'Automatically create redirect when printer goes offline',
+        'enabled': 1,
+        'nodes': [
+            {
+                'id': 'node_trigger',
+                'type': 'trigger.health_change',
+                'label': 'Printer Goes Offline',
+                'position': {'x': 100, 'y': 100},
+                'properties': {
+                    'state': 'offline',
+                    'printer_id': '',
+                    'description': 'Triggers when printer goes offline'
+                }
+            },
+            {
+                'id': 'node_redirect',
+                'type': 'action.redirect',
+                'label': 'Create Redirect',
+                'position': {'x': 400, 'y': 100},
+                'properties': {
+                    'printer_id': '{{printer_id}}',
+                    'target_printer_id': '',  # User should configure target
+                    'description': 'Redirect traffic to backup printer'
+                }
+            },
+            {
+                'id': 'node_notify',
+                'type': 'action.notify.inapp',
+                'label': 'Send Notification',
+                'position': {'x': 700, 'y': 100},
+                'properties': {
+                    'title': 'Redirect Created',
+                    'message': 'Traffic from {{printer_name}} redirected to backup printer',
+                    'type': 'info'
+                }
+            }
+        ],
+        'edges': [
+            {
+                'id': 'edge_1',
+                'source': 'node_trigger',
+                'target': 'node_redirect',
+                'sourceHandle': 'out',
+                'targetHandle': 'in'
+            },
+            {
+                'id': 'edge_2',
+                'source': 'node_redirect',
+                'target': 'node_notify',
+                'sourceHandle': 'out',
+                'targetHandle': 'in'
+            }
+        ],
+        'ui_state': {},
+        'created_by': 'system',
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat()
+    }
+    
+    # Example 3: Scheduled Health Report
+    wf3_id = uuid.uuid4().hex
+    
+    workflow3 = {
+        'id': wf3_id,
+        'name': 'Daily Printer Health Report',
+        'description': 'Send daily email with printer status summary',
+        'enabled': 0,  # Disabled by default
+        'nodes': [
+            {
+                'id': 'node_trigger',
+                'type': 'trigger.schedule',
+                'label': 'Daily at 9 AM',
+                'position': {'x': 100, 'y': 100},
+                'properties': {
+                    'schedule_type': 'cron',
+                    'cron': '0 9 * * *',
+                    'description': 'Runs every day at 9:00 AM'
+                }
+            },
+            {
+                'id': 'node_email',
+                'type': 'action.notify.email',
+                'label': 'Send Health Report',
+                'position': {'x': 400, 'y': 100},
+                'properties': {
+                    'to': 'admin@example.com',
+                    'subject': 'Daily Printer Health Report',
+                    'message': 'Daily printer status report generated at {{timestamp}}'
+                }
+            }
+        ],
+        'edges': [
+            {
+                'id': 'edge_1',
+                'source': 'node_trigger',
+                'target': 'node_email',
+                'sourceHandle': 'out',
+                'targetHandle': 'in'
+            }
+        ],
+        'ui_state': {},
+        'created_by': 'system',
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat()
+    }
+    
+    # Example 4: Webhook Integration
+    wf4_id = uuid.uuid4().hex
+    wf4_webhook_id = uuid.uuid4().hex
+    wf4_webhook_secret = uuid.uuid4().hex
+    
+    workflow4 = {
+        'id': wf4_id,
+        'name': 'External System Integration',
+        'description': 'Receive webhook from external system and log audit event',
+        'enabled': 1,
+        'nodes': [
+            {
+                'id': 'node_trigger',
+                'type': 'trigger.webhook',
+                'label': 'Webhook Trigger',
+                'position': {'x': 100, 'y': 100},
+                'properties': {
+                    'hook_id': wf4_webhook_id,
+                    'hook_secret': wf4_webhook_secret,
+                    'description': 'External webhook endpoint'
+                }
+            },
+            {
+                'id': 'node_audit',
+                'type': 'action.audit',
+                'label': 'Log Event',
+                'position': {'x': 400, 'y': 100},
+                'properties': {
+                    'event_type': 'external_webhook',
+                    'message': 'Webhook received from external system: {{payload}}'
+                }
+            }
+        ],
+        'edges': [
+            {
+                'id': 'edge_1',
+                'source': 'node_trigger',
+                'target': 'node_audit',
+                'sourceHandle': 'out',
+                'targetHandle': 'in'
+            }
+        ],
+        'ui_state': {},
+        'created_by': 'system',
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat()
+    }
+    
+    # Insert workflows
+    for workflow in [workflow1, workflow2, workflow3, workflow4]:
+        cursor.execute("""
+            INSERT INTO workflows (id, name, description, enabled, nodes, edges, ui_state, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            workflow['id'],
+            workflow['name'],
+            workflow['description'],
+            workflow['enabled'],
+            json.dumps(workflow['nodes']),
+            json.dumps(workflow['edges']),
+            json.dumps(workflow['ui_state']),
+            workflow['created_by'],
+            workflow['created_at'],
+            workflow['updated_at']
+        ))
 
 
 def init_db():
@@ -435,58 +667,20 @@ def init_db():
         ON workflow_registry_nodes(category)
     """)
 
-    # Workflows table (app-wide scope)
+    # Workflows table (simplified JSON schema)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS workflows (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT DEFAULT '',
-            is_active BOOLEAN DEFAULT 1,
+            enabled INTEGER DEFAULT 1,
+            nodes TEXT,
+            edges TEXT,
             ui_state TEXT,
             created_by TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT,
+            updated_at TEXT
         )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS workflow_nodes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workflow_id INTEGER NOT NULL,
-            node_id TEXT NOT NULL,
-            node_type TEXT NOT NULL,
-            label TEXT DEFAULT '',
-            position_x REAL DEFAULT 0,
-            position_y REAL DEFAULT 0,
-            properties TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(workflow_id, node_id),
-            FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS workflow_edges (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workflow_id INTEGER NOT NULL,
-            source_node_id TEXT NOT NULL,
-            target_node_id TEXT NOT NULL,
-            source_handle TEXT,
-            target_handle TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
-        )
-    """)
-
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_workflow_nodes_workflow
-        ON workflow_nodes(workflow_id)
-    """)
-
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_workflow_edges_workflow
-        ON workflow_edges(workflow_id)
     """)
 
     # Seed or update workflow registry defaults
@@ -1867,66 +2061,51 @@ class WorkflowRegistryNode:
 
 
 class Workflow:
-    """Model for workflow graphs."""
+    """Model for workflow graphs with simplified JSON storage."""
 
     @staticmethod
     def get_all() -> List[Dict[str, Any]]:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, name, description, is_active, created_by, created_at, updated_at
+            SELECT id, name, description, enabled, created_by, created_at, updated_at
             FROM workflows
             ORDER BY updated_at DESC
         """)
         rows = cursor.fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        return [{
+            'id': row['id'],
+            'name': row['name'],
+            'description': row['description'],
+            'is_active': bool(row['enabled']),
+            'created_by': row['created_by'],
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at']
+        } for row in rows]
 
     @staticmethod
-    def get_by_id(workflow_id: int) -> Optional[Dict[str, Any]]:
+    def get_by_id(workflow_id: str) -> Optional[Dict[str, Any]]:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,))
         workflow = cursor.fetchone()
-        if not workflow:
-            conn.close()
-            return None
-
-        cursor.execute("SELECT * FROM workflow_nodes WHERE workflow_id = ?", (workflow_id,))
-        nodes = cursor.fetchall()
-        cursor.execute("SELECT * FROM workflow_edges WHERE workflow_id = ?", (workflow_id,))
-        edges = cursor.fetchall()
         conn.close()
+        
+        if not workflow:
+            return None
 
         return {
             'id': workflow['id'],
             'name': workflow['name'],
             'description': workflow['description'],
-            'is_active': bool(workflow['is_active']),
-            'created_by': workflow['created_by'],
+            'is_active': bool(workflow['enabled']),
+            'created_by': workflow['created_by'] if 'created_by' in workflow.keys() else None,
             'created_at': workflow['created_at'],
             'updated_at': workflow['updated_at'],
             'ui_state': json.loads(workflow['ui_state']) if workflow['ui_state'] else None,
-            'nodes': [
-                {
-                    'id': node['node_id'],
-                    'type': node['node_type'],
-                    'label': node['label'],
-                    'position': {'x': node['position_x'], 'y': node['position_y']},
-                    'properties': json.loads(node['properties']) if node['properties'] else {}
-                }
-                for node in nodes
-            ],
-            'edges': [
-                {
-                    'id': edge['id'],
-                    'source': edge['source_node_id'],
-                    'target': edge['target_node_id'],
-                    'sourceHandle': edge['source_handle'],
-                    'targetHandle': edge['target_handle']
-                }
-                for edge in edges
-            ]
+            'nodes': json.loads(workflow['nodes']) if workflow['nodes'] else [],
+            'edges': json.loads(workflow['edges']) if workflow['edges'] else []
         }
 
     @staticmethod
@@ -1934,26 +2113,32 @@ class Workflow:
                nodes: Optional[List[Dict[str, Any]]] = None,
                edges: Optional[List[Dict[str, Any]]] = None,
                ui_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        workflow_id = uuid.uuid4().hex
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO workflows (name, description, created_by, ui_state)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO workflows (id, name, description, enabled, nodes, edges, ui_state, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?, datetime('now'), datetime('now'))
             """,
-            (name, description or '', created_by, json.dumps(ui_state) if ui_state else None)
+            (
+                workflow_id,
+                name,
+                description or '',
+                json.dumps(nodes or []),
+                json.dumps(edges or []),
+                json.dumps(ui_state) if ui_state else None,
+                created_by
+            )
         )
         conn.commit()
-        workflow_id = cursor.lastrowid
         conn.close()
-
-        if nodes is not None or edges is not None:
-            Workflow.save_graph(workflow_id, nodes or [], edges or [])
 
         return Workflow.get_by_id(workflow_id)
 
     @staticmethod
-    def update(workflow_id: int, name: Optional[str] = None, description: Optional[str] = None,
+    def update(workflow_id: str, name: Optional[str] = None, description: Optional[str] = None,
                is_active: Optional[bool] = None,
                nodes: Optional[List[Dict[str, Any]]] = None,
                edges: Optional[List[Dict[str, Any]]] = None,
@@ -1970,14 +2155,20 @@ class Workflow:
             fields.append("description = ?")
             values.append(description)
         if is_active is not None:
-            fields.append("is_active = ?")
+            fields.append("enabled = ?")
             values.append(int(is_active))
+        if nodes is not None:
+            fields.append("nodes = ?")
+            values.append(json.dumps(nodes))
+        if edges is not None:
+            fields.append("edges = ?")
+            values.append(json.dumps(edges))
         if ui_state is not None:
             fields.append("ui_state = ?")
             values.append(json.dumps(ui_state))
 
         if fields:
-            fields.append("updated_at = CURRENT_TIMESTAMP")
+            fields.append("updated_at = datetime('now')")
             values.append(workflow_id)
             cursor.execute(
                 f"UPDATE workflows SET {', '.join(fields)} WHERE id = ?",
@@ -1986,13 +2177,10 @@ class Workflow:
             conn.commit()
         conn.close()
 
-        if nodes is not None or edges is not None:
-            Workflow.save_graph(workflow_id, nodes or [], edges or [])
-
         return Workflow.get_by_id(workflow_id)
 
     @staticmethod
-    def delete(workflow_id: int) -> bool:
+    def delete(workflow_id: str) -> bool:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
@@ -2002,62 +2190,19 @@ class Workflow:
         return deleted > 0
 
     @staticmethod
-    def save_graph(workflow_id: int, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> None:
+    def save_graph(workflow_id: str, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> None:
+        """Save workflow graph (nodes and edges) - simplified version."""
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM workflow_edges WHERE workflow_id = ?", (workflow_id,))
-        cursor.execute("DELETE FROM workflow_nodes WHERE workflow_id = ?", (workflow_id,))
-
-        node_rows = []
-        for node in nodes:
-            position = node.get('position') or {}
-            node_rows.append((
-                workflow_id,
-                node['id'],
-                node['type'],
-                node.get('label', ''),
-                position.get('x', 0),
-                position.get('y', 0),
-                json.dumps(node.get('properties', {}))
-            ))
-
-        if node_rows:
-            cursor.executemany(
-                """
-                INSERT INTO workflow_nodes
-                (workflow_id, node_id, node_type, label, position_x, position_y, properties)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                node_rows
-            )
-
-        edge_rows = []
-        for edge in edges:
-            edge_rows.append((
-                workflow_id,
-                edge['source'],
-                edge['target'],
-                edge.get('sourceHandle'),
-                edge.get('targetHandle')
-            ))
-
-        if edge_rows:
-            cursor.executemany(
-                """
-                INSERT INTO workflow_edges
-                (workflow_id, source_node_id, target_node_id, source_handle, target_handle)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                edge_rows
-            )
-
-        cursor.execute("UPDATE workflows SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (workflow_id,))
-
+        cursor.execute(
+            "UPDATE workflows SET nodes = ?, edges = ?, updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(nodes), json.dumps(edges), workflow_id)
+        )
         conn.commit()
         conn.close()
 
     @staticmethod
-    def validate_connection(workflow_id: int, source_node_id: str, target_node_id: str,
+    def validate_connection(workflow_id: str, source_node_id: str, target_node_id: str,
                             source_handle: Optional[str], target_handle: Optional[str],
                             source_node_type: Optional[str] = None,
                             target_node_type: Optional[str] = None) -> Tuple[bool, str]:
@@ -2069,13 +2214,14 @@ class Workflow:
         if source_node_id == target_node_id:
             return False, 'Cannot connect a node to itself.'
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT node_id, node_type FROM workflow_nodes WHERE workflow_id = ?", (workflow_id,))
-        nodes = cursor.fetchall()
-        conn.close()
-
-        node_map = {row['node_id']: row['node_type'] for row in nodes}
+        # Get workflow to check node types
+        workflow = Workflow.get_by_id(workflow_id)
+        if not workflow:
+            return False, 'Workflow not found.'
+        
+        nodes = workflow.get('nodes', [])
+        node_map = {node['id']: node['type'] for node in nodes}
+        
         source_type = node_map.get(source_node_id) or source_node_type
         target_type = node_map.get(target_node_id) or target_node_type
         if not source_type or not target_type:
