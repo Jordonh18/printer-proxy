@@ -697,6 +697,10 @@ def init_db():
             'icon': 'CalendarClock',
             'inputs': [],
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'output_schema': [
+                {'key': 'scheduled_time', 'type': 'string', 'description': 'Scheduled execution time'},
+                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp of execution'}
+            ],
             'config_schema': {
                 'fields': [
                     {'key': 'cron', 'label': 'Cron', 'type': 'string', 'placeholder': '0 9 * * 1-5'},
@@ -714,6 +718,13 @@ def init_db():
             'icon': 'Zap',
             'inputs': [],
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'output_schema': [
+                {'key': 'event_type', 'type': 'string', 'description': 'Type of event triggered'},
+                {'key': 'printer_id', 'type': 'string', 'description': 'ID of affected printer'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Name of affected printer'},
+                {'key': 'printer_ip', 'type': 'string', 'description': 'IP address of printer'},
+                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp'}
+            ],
             'config_schema': {
                 'fields': [
                     {
@@ -741,6 +752,12 @@ def init_db():
             'icon': 'Webhook',
             'inputs': [],
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'output_schema': [
+                {'key': 'payload', 'type': 'object', 'description': 'JSON payload from webhook request'},
+                {'key': 'headers', 'type': 'object', 'description': 'HTTP headers from request'},
+                {'key': 'method', 'type': 'string', 'description': 'HTTP method (GET/POST)'},
+                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp of when webhook was received'}
+            ],
             'config_schema': {
                 'fields': [
                     {
@@ -771,6 +788,13 @@ def init_db():
             'icon': 'ListFilter',
             'inputs': [],
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'output_schema': [
+                {'key': 'printer_id', 'type': 'string', 'description': 'ID of the printer'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
+                {'key': 'queue_count', 'type': 'number', 'description': 'Current queue count'},
+                {'key': 'threshold', 'type': 'number', 'description': 'Threshold value that was exceeded'},
+                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp'}
+            ],
             'config_schema': {
                 'fields': [
                     {
@@ -793,6 +817,14 @@ def init_db():
             'icon': 'Activity',
             'inputs': [],
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
+            'output_schema': [
+                {'key': 'printer_id', 'type': 'string', 'description': 'ID of the printer'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
+                {'key': 'printer_ip', 'type': 'string', 'description': 'IP address of the printer'},
+                {'key': 'old_state', 'type': 'string', 'description': 'Previous health state'},
+                {'key': 'new_state', 'type': 'string', 'description': 'New health state (online/offline)'},
+                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp'}
+            ],
             'config_schema': {
                 'fields': [
                     {
@@ -823,15 +855,23 @@ def init_db():
             'icon': 'Printer',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'job_id', 'type': 'string', 'description': 'ID of the print job created'},
+                {'key': 'printer_id', 'type': 'string', 'description': 'ID of the printer used'},
+                {'key': 'document_path', 'type': 'string', 'description': 'Path to the printed document'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether job was submitted successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
                         'type': 'select',
-                        'helperText': 'Choose the printer to print to.'
+                        'helperText': 'Choose the printer to print to.',
+                        'supportsDynamic': True
                     },
-                    {'key': 'document_path', 'label': 'Document Path', 'type': 'string'},
+                    {'key': 'document_path', 'label': 'Document Path', 'type': 'string', 'supportsDynamic': True},
                     {'key': 'copies', 'label': 'Copies', 'type': 'number'}
                 ]
             },
@@ -846,19 +886,33 @@ def init_db():
             'icon': 'ArrowRightLeft',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'redirect_id', 'type': 'string', 'description': 'ID of the redirect created'},
+                {'key': 'source_printer_id', 'type': 'string', 'description': 'Source printer ID'},
+                {'key': 'source_printer_name', 'type': 'string', 'description': 'Source printer name'},
+                {'key': 'source_printer_ip', 'type': 'string', 'description': 'Source printer IP'},
+                {'key': 'target_printer_id', 'type': 'string', 'description': 'Target printer ID'},
+                {'key': 'target_printer_name', 'type': 'string', 'description': 'Target printer name'},
+                {'key': 'target_printer_ip', 'type': 'string', 'description': 'Target printer IP'},
+                {'key': 'port', 'type': 'number', 'description': 'Port used for redirect'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether redirect was created successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'source_printer_id',
                         'label': 'Source Printer',
                         'type': 'select',
-                        'helperText': 'Select the printer receiving jobs.'
+                        'helperText': 'Select the printer receiving jobs.',
+                        'supportsDynamic': True
                     },
                     {
                         'key': 'target_printer_id',
                         'label': 'Target Printer',
                         'type': 'select',
-                        'helperText': 'Select the printer to redirect to.'
+                        'helperText': 'Select the printer to redirect to.',
+                        'supportsDynamic': True
                     },
                     {'key': 'port', 'label': 'Port', 'type': 'number'}
                 ]
@@ -874,13 +928,20 @@ def init_db():
             'icon': 'ArrowRightLeft',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'source_printer_id', 'type': 'string', 'description': 'Printer that was redirected'},
+                {'key': 'source_printer_name', 'type': 'string', 'description': 'Name of source printer'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether redirect was disabled successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'source_printer_id',
                         'label': 'Source Printer',
                         'type': 'select',
-                        'helperText': 'Select the printer with an active redirect.'
+                        'helperText': 'Select the printer with an active redirect.',
+                        'supportsDynamic': True
                     }
                 ]
             },
@@ -895,13 +956,20 @@ def init_db():
             'icon': 'PauseCircle',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'printer_id', 'type': 'string', 'description': 'Printer whose queue was paused'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether queue was paused successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
                         'type': 'select',
-                        'helperText': 'Choose the queue to pause.'
+                        'helperText': 'Choose the queue to pause.',
+                        'supportsDynamic': True
                     }
                 ]
             },
@@ -916,13 +984,20 @@ def init_db():
             'icon': 'PlayCircle',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'printer_id', 'type': 'string', 'description': 'Printer whose queue was resumed'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether queue was resumed successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
                         'type': 'select',
-                        'helperText': 'Choose the queue to resume.'
+                        'helperText': 'Choose the queue to resume.',
+                        'supportsDynamic': True
                     }
                 ]
             },
@@ -937,13 +1012,21 @@ def init_db():
             'icon': 'Trash2',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'printer_id', 'type': 'string', 'description': 'Printer whose queue was cleared'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
+                {'key': 'jobs_cleared', 'type': 'number', 'description': 'Number of jobs removed'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether queue was cleared successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
                         'type': 'select',
-                        'helperText': 'Choose the queue to clear.'
+                        'helperText': 'Choose the queue to clear.',
+                        'supportsDynamic': True
                     }
                 ]
             },
@@ -958,11 +1041,17 @@ def init_db():
             'icon': 'Mail',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'to', 'type': 'string', 'description': 'Email recipient'},
+                {'key': 'subject', 'type': 'string', 'description': 'Email subject'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether email was sent successfully'}
+            ],
             'config_schema': {
                 'fields': [
-                    {'key': 'to', 'label': 'To', 'type': 'string'},
-                    {'key': 'subject', 'label': 'Subject', 'type': 'string'},
-                    {'key': 'body', 'label': 'Body', 'type': 'string'}
+                    {'key': 'to', 'label': 'To', 'type': 'string', 'supportsDynamic': True},
+                    {'key': 'subject', 'label': 'Subject', 'type': 'string', 'supportsDynamic': True},
+                    {'key': 'body', 'label': 'Body', 'type': 'string', 'supportsDynamic': True}
                 ]
             },
             'default_properties': {'to': '', 'subject': '', 'body': ''}
@@ -976,11 +1065,17 @@ def init_db():
             'icon': 'Bell',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'notification_id', 'type': 'string', 'description': 'ID of the notification created'},
+                {'key': 'title', 'type': 'string', 'description': 'Notification title'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether notification was created successfully'}
+            ],
             'config_schema': {
                 'fields': [
-                    {'key': 'title', 'label': 'Title', 'type': 'string'},
-                    {'key': 'message', 'label': 'Message', 'type': 'string'},
-                    {'key': 'link', 'label': 'Link', 'type': 'string'}
+                    {'key': 'title', 'label': 'Title', 'type': 'string', 'supportsDynamic': True},
+                    {'key': 'message', 'label': 'Message', 'type': 'string', 'supportsDynamic': True},
+                    {'key': 'link', 'label': 'Link', 'type': 'string', 'supportsDynamic': True}
                 ]
             },
             'default_properties': {'title': '', 'message': '', 'link': ''}
@@ -994,10 +1089,16 @@ def init_db():
             'icon': 'ClipboardList',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'action', 'type': 'string', 'description': 'Action that was logged'},
+                {'key': 'details', 'type': 'string', 'description': 'Details of the action'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether log entry was created'}
+            ],
             'config_schema': {
                 'fields': [
-                    {'key': 'action', 'label': 'Action', 'type': 'string'},
-                    {'key': 'details', 'label': 'Details', 'type': 'string'}
+                    {'key': 'action', 'label': 'Action', 'type': 'string', 'supportsDynamic': True},
+                    {'key': 'details', 'label': 'Details', 'type': 'string', 'supportsDynamic': True}
                 ]
             },
             'default_properties': {'action': 'WORKFLOW_ACTION', 'details': ''}
@@ -1011,15 +1112,23 @@ def init_db():
             'icon': 'StickyNote',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'printer_id', 'type': 'string', 'description': 'Printer that was updated'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
+                {'key': 'note', 'type': 'string', 'description': 'Note that was added'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether note was added successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
                         'type': 'select',
-                        'helperText': 'Choose the printer to update.'
+                        'helperText': 'Choose the printer to update.',
+                        'supportsDynamic': True
                     },
-                    {'key': 'note', 'label': 'Note', 'type': 'string'}
+                    {'key': 'note', 'label': 'Note', 'type': 'string', 'supportsDynamic': True}
                 ]
             },
             'default_properties': {'printer_id': '', 'note': ''}
@@ -1033,6 +1142,8 @@ def init_db():
             'icon': 'StopCircle',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [],
+            'allow_multiple_inputs': True,
+            'output_schema': [],
             'config_schema': None,
             'default_properties': {}
         },
@@ -1045,6 +1156,11 @@ def init_db():
             'icon': 'Filter',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'data'}],
             'outputs': [{'id': 'out', 'label': 'Out', 'type': 'data'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'matched', 'type': 'boolean', 'description': 'Whether the filter condition matched'},
+                {'key': 'data', 'type': 'object', 'description': 'Filtered data (passed through if matched)'}
+            ],
             'config_schema': {
                 'fields': [
                     {
@@ -1075,9 +1191,13 @@ def init_db():
             'icon': 'Shuffle',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'data'}],
             'outputs': [{'id': 'out', 'label': 'Out', 'type': 'data'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'data', 'type': 'object', 'description': 'Data with remapped field names'}
+            ],
             'config_schema': {
                 'fields': [
-                    {'key': 'mappings', 'label': 'Mappings (JSON)', 'type': 'string'}
+                    {'key': 'mappings', 'label': 'Mappings (JSON)', 'type': 'string', 'supportsDynamic': True}
                 ]
             },
             'default_properties': {'mappings': '{"source":"target"}'}
@@ -1091,12 +1211,17 @@ def init_db():
             'icon': 'Type',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'data'}],
             'outputs': [{'id': 'out', 'label': 'Out', 'type': 'data'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'result', 'type': 'string', 'description': 'Rendered template string'}
+            ],
             'config_schema': {
                 'fields': [
-                    {'key': 'template', 'label': 'Template', 'type': 'string'}
+                    {'key': 'template', 'label': 'Template', 'type': 'string', 'supportsDynamic': True},
+                    {'key': 'output_key', 'label': 'Output Key', 'type': 'string', 'placeholder': 'result'}
                 ]
             },
-            'default_properties': {'template': 'Printer {{printer_id}} is offline.'}
+            'default_properties': {'template': 'Printer {{printer_id}} is offline.', 'output_key': 'result'}
         },
         {
             'node_key': 'logic.if',
@@ -1109,6 +1234,11 @@ def init_db():
             'outputs': [
                 {'id': 'true', 'label': 'True', 'type': 'flow'},
                 {'id': 'false', 'label': 'False', 'type': 'flow'}
+            ],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'condition_result', 'type': 'boolean', 'description': 'Result of the condition evaluation'},
+                {'key': 'branch', 'type': 'string', 'description': 'Which branch was taken (true/false)'}
             ],
             'config_schema': {
                 'fields': [
@@ -1143,6 +1273,11 @@ def init_db():
                 {'id': 'case1', 'label': 'Case 1', 'type': 'flow'},
                 {'id': 'case2', 'label': 'Case 2', 'type': 'flow'},
                 {'id': 'default', 'label': 'Default', 'type': 'flow'}
+            ],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'matched_case', 'type': 'string', 'description': 'Which case was matched (case1/case2/default)'},
+                {'key': 'switch_value', 'type': 'string', 'description': 'The value that was evaluated'}
             ],
             'config_schema': {
                 'fields': [
@@ -1195,9 +1330,15 @@ def init_db():
             'icon': 'Globe',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'status_code', 'type': 'number', 'description': 'HTTP response status code'},
+                {'key': 'response_body', 'type': 'object', 'description': 'Response body (JSON parsed if applicable)'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether request was successful (2xx status)'}
+            ],
             'config_schema': {
                 'fields': [
-                    {'key': 'url', 'label': 'URL', 'type': 'string'},
+                    {'key': 'url', 'label': 'URL', 'type': 'string', 'supportsDynamic': True},
                     {
                         'key': 'method',
                         'label': 'Method',
@@ -1223,10 +1364,15 @@ def init_db():
             'icon': 'MessageCircle',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'status_code', 'type': 'number', 'description': 'HTTP response status code'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether message was sent successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {'key': 'webhook_url', 'label': 'Webhook URL', 'type': 'string'},
-                    {'key': 'message', 'label': 'Message', 'type': 'string'}
+                    {'key': 'message', 'label': 'Message', 'type': 'string', 'supportsDynamic': True}
                 ]
             },
             'default_properties': {'webhook_url': '', 'message': ''}
@@ -1240,10 +1386,15 @@ def init_db():
             'icon': 'MessageSquare',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
+            'output_schema': [
+                {'key': 'status_code', 'type': 'number', 'description': 'HTTP response status code'},
+                {'key': 'success', 'type': 'boolean', 'description': 'Whether message was sent successfully'}
+            ],
             'config_schema': {
                 'fields': [
                     {'key': 'webhook_url', 'label': 'Webhook URL', 'type': 'string'},
-                    {'key': 'message', 'label': 'Message', 'type': 'string'}
+                    {'key': 'message', 'label': 'Message', 'type': 'string', 'supportsDynamic': True}
                 ]
             },
             'default_properties': {'webhook_url': '', 'message': ''}
@@ -1256,6 +1407,8 @@ def init_db():
             'color': '#0ea5e9',
             'icon': 'MessageCircle',
             'inputs': [{'id': 'in', 'label': 'In', 'type': 'flow'}],
+            'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
+            'allow_multiple_inputs': True,
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
             'config_schema': {
                 'fields': [
@@ -2220,6 +2373,7 @@ class Workflow:
             return False, 'Workflow not found.'
         
         nodes = workflow.get('nodes', [])
+        edges = workflow.get('edges', [])
         node_map = {node['id']: node['type'] for node in nodes}
         
         source_type = node_map.get(source_node_id) or source_node_type
@@ -2256,6 +2410,15 @@ class Workflow:
         input_type = target.get('type', 'any')
         if output_type != 'any' and input_type != 'any' and output_type != input_type:
             return False, 'Incompatible connection types.'
+
+        # Check if target handle already has an incoming connection
+        allow_multiple_inputs = target_registry.get('allow_multiple_inputs', False)
+        if not allow_multiple_inputs:
+            for edge in edges:
+                edge_target_handle = normalize_handle(edge.get('targetHandle') or edge.get('target_handle'))
+                if (edge.get('target') == target_node_id and
+                    edge_target_handle == normalized_target):
+                    return False, 'This input already has a connection. Node does not support multiple inputs.'
 
         return True, 'Connection valid.'
 

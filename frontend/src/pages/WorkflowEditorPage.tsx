@@ -5,6 +5,7 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   Background,
+  ConnectionLineType,
   Controls,
   ReactFlow,
   ReactFlowProvider,
@@ -40,6 +41,7 @@ import { toast } from '@/lib/toast';
 import { useAuth } from '@/contexts/AuthContext';
 import WorkflowNode, { type WorkflowNodeData } from '@/components/workflows/WorkflowNode';
 import { NodePalette } from '@/components/workflows/NodePalette';
+import { VariablePicker } from '@/components/workflows/VariablePicker';
 import type { WorkflowEdge, WorkflowNode as WorkflowNodeRecord, WorkflowRegistryNode } from '@/types/api';
 
 const nodeTypes = {
@@ -91,6 +93,7 @@ export function WorkflowEditorPage() {
   const [nodes, setNodes] = useNodesState<Node<WorkflowNodeData>>([]);
   const [edges, setEdges] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [uiState, setUiState] = useState<Record<string, unknown> | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -145,6 +148,16 @@ export function WorkflowEditorPage() {
     setSelectedNodeId((current) => (current === nodeId ? null : current));
     markDirty();
   }, [canEdit, pushHistory, setNodes, setEdges, markDirty]);
+
+  const deleteEdgeById = useCallback((edgeId: string) => {
+    if (!canEdit) {
+      return;
+    }
+    pushHistory();
+    setEdges((current: Edge[]) => current.filter((edge) => edge.id !== edgeId));
+    setSelectedEdgeId((current) => (current === edgeId ? null : current));
+    markDirty();
+  }, [canEdit, pushHistory, setEdges, markDirty]);
 
   useEffect(() => {
     if (!workflow) {
@@ -212,6 +225,24 @@ export function WorkflowEditorPage() {
   useEffect(() => {
     deleteNodeByIdRef.current = deleteNodeById;
   }, [deleteNodeById]);
+
+  // Keyboard handler for edge deletion
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedEdgeId && canEdit) {
+        // Prevent deletion if we're focused on an input element
+        const target = event.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
+        event.preventDefault();
+        deleteEdgeById(selectedEdgeId);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedEdgeId, canEdit, deleteEdgeById]);
 
   const handleUndo = () => {
     const previous = history.current.pop();
@@ -383,7 +414,31 @@ export function WorkflowEditorPage() {
 
   const handleSelection = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNodeId(node.id);
-  }, []);
+    setSelectedEdgeId(null);
+    // Bring selected node to front by updating its zIndex
+    setNodes((current: Node<WorkflowNodeData>[]) =>
+      current.map((n) => ({
+        ...n,
+        zIndex: n.id === node.id ? 1000 : (n.zIndex || 0),
+      }))
+    );
+  }, [setNodes]);
+
+  const handleEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    setSelectedEdgeId(edge.id);
+    setSelectedNodeId(null);
+    // Highlight the selected edge
+    setEdges((current: Edge[]) =>
+      current.map((e) => ({
+        ...e,
+        style: {
+          ...e.style,
+          strokeWidth: e.id === edge.id ? 4 : 3,
+        },
+        selected: e.id === edge.id,
+      }))
+    );
+  }, [setEdges]);
 
   const handleExit = () => {
     if (isDirty) {
@@ -564,26 +619,12 @@ export function WorkflowEditorPage() {
     }
   }, [workflow, serializeWorkflow]);
 
-  const handleAutosave = useCallback(async () => {
-    if (!workflow || !isDirty) {
-      return;
-    }
-    const payload = serializeWorkflow();
-    try {
-      await workflowApi.update(workflow.id, payload);
-      setIsDirty(false);
-    } catch (error) {
-      toast.error('Autosave failed', error instanceof Error ? error.message : undefined);
-    }
-  }, [workflow, isDirty, serializeWorkflow]);
-
   // Autosave effect - debounce changes
   useEffect(() => {
     if (!workflow || !canEdit || !isDirty) {
       return;
     }
     const timeout = setTimeout(() => {
-      // Call autosave directly instead of using handleAutosave callback
       const payload = serializeWorkflow();
       workflowApi.update(workflow.id, payload)
         .then(() => setIsDirty(false))
@@ -650,6 +691,50 @@ export function WorkflowEditorPage() {
                   const isReadOnly = field.readOnly || !canEdit;
                   const usesPrinterSelect = field.key.includes('printer_id');
                   const selectOptions = usesPrinterSelect ? printerOptions : field.options || [];
+                  
+                  // Boolean fields
+                  if (field.type === 'boolean') {
+                    return (
+                      <div key={field.key} className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={Boolean(currentValue)}
+                          onChange={(event) => updateNodeProperty(field.key, event.target.checked)}
+                          disabled={isReadOnly}
+                        />
+                      </div>
+                    );
+                  }
+
+                  // Select/dropdown fields that support dynamic variables (like printer_id)
+                  if ((field.type === 'select' || usesPrinterSelect) && field.supportsDynamic) {
+                    return (
+                      <div key={field.key}>
+                        <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
+                        <VariablePicker
+                          value={currentValue !== undefined ? String(currentValue) : ''}
+                          onChange={(value) => updateNodeProperty(field.key, value)}
+                          nodes={nodes}
+                          edges={edges}
+                          currentNodeId={selectedNode.id}
+                          registry={registry}
+                          placeholder={field.placeholder || (usesPrinterSelect ? 'Select printer or use {{variable}}' : 'Select or use {{variable}}')}
+                          disabled={isReadOnly}
+                          options={selectOptions}
+                        />
+                        {field.helperText && (
+                          <p className="mt-1 text-xs text-muted-foreground">{field.helperText}</p>
+                        )}
+                        <p className="mt-1 text-xs text-muted-foreground/70">
+                          Select from dropdown or type {`{{variable}}`}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  // Regular select fields (no dynamic support)
                   if (field.type === 'select' || usesPrinterSelect) {
                     return (
                       <div key={field.key}>
@@ -677,21 +762,32 @@ export function WorkflowEditorPage() {
                     );
                   }
 
-                  if (field.type === 'boolean') {
+                  // Text/string fields that support dynamic values
+                  if (field.supportsDynamic && field.type === 'string') {
                     return (
-                      <div key={field.key} className="flex items-center justify-between">
+                      <div key={field.key}>
                         <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4"
-                          checked={Boolean(currentValue)}
-                          onChange={(event) => updateNodeProperty(field.key, event.target.checked)}
+                        <VariablePicker
+                          value={currentValue !== undefined ? String(currentValue) : ''}
+                          onChange={(value) => updateNodeProperty(field.key, value)}
+                          nodes={nodes}
+                          edges={edges}
+                          currentNodeId={selectedNode.id}
+                          registry={registry}
+                          placeholder={field.placeholder}
                           disabled={isReadOnly}
                         />
+                        {field.helperText && (
+                          <p className="mt-1 text-xs text-muted-foreground">{field.helperText}</p>
+                        )}
+                        <p className="mt-1 text-xs text-muted-foreground/70">
+                          Supports variables: {`{{variable_name}}`}
+                        </p>
                       </div>
                     );
                   }
 
+                  // Regular text/number input fields
                   return (
                     <div key={field.key}>
                       <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
@@ -733,8 +829,25 @@ export function WorkflowEditorPage() {
             onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
             onNodeClick={handleSelection}
+            onEdgeClick={handleEdgeClick}
             onPaneClick={() => {
               setSelectedNodeId(null);
+              setSelectedEdgeId(null);
+              // Reset edge selection styling
+              setEdges((current: Edge[]) =>
+                current.map((e) => ({
+                  ...e,
+                  style: { ...e.style, strokeWidth: 3 },
+                  selected: false,
+                }))
+              );
+              // Reset node zIndex
+              setNodes((current: Node<WorkflowNodeData>[]) =>
+                current.map((n) => ({
+                  ...n,
+                  zIndex: 0,
+                }))
+              );
             }}
             nodeTypes={nodeTypes}
             fitView
@@ -743,6 +856,10 @@ export function WorkflowEditorPage() {
             snapGrid={GRID_SIZE}
             nodesDraggable={canEdit}
             nodesConnectable={canEdit}
+            edgesFocusable={canEdit}
+            elementsSelectable={canEdit}
+            connectionLineType={ConnectionLineType.SmoothStep}
+            connectionLineStyle={{ strokeWidth: 3, stroke: '#10b981' }}
             onMoveEnd={(_: unknown, viewport: Viewport) => {
               setUiState(viewport);
               if (canEdit) {

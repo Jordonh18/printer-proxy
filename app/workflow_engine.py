@@ -95,7 +95,12 @@ class WorkflowEngine:
         return None
     
     def _execute_node(self, workflow: Dict, node_id: str, context: Dict[str, Any]) -> bool:
-        """Execute a single node and follow edges."""
+        """
+        Execute a single node and follow edges.
+        
+        Context accumulates as the workflow executes - each node's outputs
+        are merged into context for downstream nodes to reference via {{variable}}.
+        """
         node = self._get_node_by_id(workflow, node_id)
         if not node:
             return False
@@ -104,7 +109,10 @@ class WorkflowEngine:
         
         # Execute based on node type
         node_type = node['type']
-        properties = node.get('properties', {})
+        raw_properties = node.get('properties', {})
+        
+        # Render all properties with current context (supports {{variable}} syntax)
+        properties = self._render_properties(raw_properties, context)
         
         # Triggers (already fired, continue to next)
         if node_type.startswith('trigger.'):
@@ -117,14 +125,21 @@ class WorkflowEngine:
                 logger.info("Workflow terminated by End node")
                 return True  # Success, but don't continue
             
-            success = self._execute_action(node_type, properties, context)
-            if success:
+            result = self._execute_action(node_type, properties, context)
+            if isinstance(result, dict):
+                # Action returned outputs - merge into context
+                context.update(result)
+                return self._execute_next_nodes(workflow, node_id, context)
+            elif result:
                 return self._execute_next_nodes(workflow, node_id, context)
             return False
         
         # Conditionals
         elif node_type.startswith('logic.'):
-            output_handle = self._evaluate_conditional(node_type, properties, context)
+            output_handle, condition_result = self._evaluate_conditional(node_type, properties, context)
+            # Merge conditional outputs into context
+            context['condition_result'] = condition_result
+            context['branch'] = output_handle
             if output_handle:
                 return self._execute_next_nodes(workflow, node_id, context, output_handle)
             return False
@@ -136,8 +151,12 @@ class WorkflowEngine:
         
         # Integrations
         elif node_type.startswith('integration.'):
-            success = self._execute_integration(node_type, properties, context)
-            if success:
+            result = self._execute_integration(node_type, properties, context)
+            if isinstance(result, dict):
+                # Integration returned outputs - merge into context
+                context.update(result)
+                return self._execute_next_nodes(workflow, node_id, context)
+            elif result:
                 return self._execute_next_nodes(workflow, node_id, context)
             return False
         
@@ -194,98 +213,141 @@ class WorkflowEngine:
             logger.error(f"Error executing action {action_type}: {e}", exc_info=True)
             return False
     
-    def _action_create_redirect(self, properties: Dict, context: Dict) -> bool:
-        """Create a printer redirect."""
-        printer_id = properties.get('printer_id')
-        target_id = properties.get('target_printer_id')
+    def _action_create_redirect(self, properties: Dict, context: Dict) -> Dict:
+        """
+        Create a printer redirect.
         
-        if not printer_id or not target_id:
-            logger.error("Missing printer_id or target_printer_id")
-            return False
+        Returns dict with output variables for downstream nodes.
+        """
+        # Use rendered properties - may contain {{variable}} references
+        source_printer_id = properties.get('source_printer_id') or properties.get('printer_id')
+        target_printer_id = properties.get('target_printer_id')
+        port = properties.get('port', 9100)
+        
+        if not source_printer_id or not target_printer_id:
+            logger.error("Missing source_printer_id or target_printer_id")
+            return {'success': False}
         
         try:
             network = get_network_manager()
-            # Get printer IPs
+            # Get printer details
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT ip FROM printers WHERE id = ?", (printer_id,))
+            cursor.execute("SELECT id, name, ip FROM printers WHERE id = ?", (source_printer_id,))
             source_row = cursor.fetchone()
-            cursor.execute("SELECT ip FROM printers WHERE id = ?", (target_id,))
+            cursor.execute("SELECT id, name, ip FROM printers WHERE id = ?", (target_printer_id,))
             target_row = cursor.fetchone()
             conn.close()
             
             if not source_row or not target_row:
-                return False
+                return {'success': False}
+            
+            source_name, source_ip = source_row[1], source_row[2]
+            target_name, target_ip = target_row[1], target_row[2]
             
             # Create redirect in database
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO redirects (printer_id, target_printer_id, active, created_at) VALUES (?, ?, 1, ?)",
-                (printer_id, target_id, datetime.now().isoformat())
+                (source_printer_id, target_printer_id, datetime.now().isoformat())
             )
+            redirect_id = cursor.lastrowid
             conn.commit()
             conn.close()
             
             # Apply NAT rules
-            success, _ = network.add_nat_rule(source_row[0], target_row[0], 9100)
-            return success
+            success, _ = network.add_nat_rule(source_ip, target_ip, port)
+            
+            # Return output variables for downstream nodes
+            return {
+                'redirect_id': str(redirect_id),
+                'source_printer_id': source_printer_id,
+                'source_printer_name': source_name,
+                'source_printer_ip': source_ip,
+                'target_printer_id': target_printer_id,
+                'target_printer_name': target_name,
+                'target_printer_ip': target_ip,
+                'port': port,
+                'success': success
+            }
             
         except Exception as e:
             logger.error(f"Error creating redirect: {e}")
-            return False
+            return {'success': False}
     
-    def _action_delete_redirect(self, properties: Dict, context: Dict) -> bool:
+    def _action_delete_redirect(self, properties: Dict, context: Dict) -> Dict:
         """Delete a printer redirect."""
-        printer_id = properties.get('printer_id')
+        source_printer_id = properties.get('source_printer_id') or properties.get('printer_id')
         
-        if not printer_id:
-            return False
+        if not source_printer_id:
+            return {'success': False}
         
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("UPDATE redirects SET active = 0 WHERE printer_id = ?", (printer_id,))
+            
+            # Get printer info
+            cursor.execute("SELECT name, ip FROM printers WHERE id = ?", (source_printer_id,))
+            row = cursor.fetchone()
+            printer_name = row[0] if row else ''
+            printer_ip = row[1] if row else ''
+            
+            cursor.execute("UPDATE redirects SET active = 0 WHERE printer_id = ?", (source_printer_id,))
             conn.commit()
             conn.close()
             
             # Remove NAT rules
             network = get_network_manager()
-            cursor = conn.cursor()
-            cursor.execute("SELECT ip FROM printers WHERE id = ?", (printer_id,))
-            row = cursor.fetchone()
-            conn.close()
+            if printer_ip:
+                success, _ = network.remove_nat_rule(printer_ip, 9100)
+            else:
+                success = False
             
-            if row:
-                success, _ = network.remove_nat_rule(row[0], 9100)
-                return success
-            return False
+            return {
+                'source_printer_id': source_printer_id,
+                'source_printer_name': printer_name,
+                'success': success
+            }
             
         except Exception as e:
             logger.error(f"Error deleting redirect: {e}")
-            return False
+            return {'success': False}
     
-    def _action_pause_queue(self, properties: Dict, context: Dict) -> bool:
+    def _action_pause_queue(self, properties: Dict, context: Dict) -> Dict:
         """Pause printer queue."""
-        # This would integrate with print queue management
-        logger.info(f"Pausing queue for printer {properties.get('printer_id')}")
-        return True
+        printer_id = properties.get('printer_id') or context.get('printer_id')
+        logger.info(f"Pausing queue for printer {printer_id}")
+        return {
+            'printer_id': printer_id,
+            'success': True
+        }
     
-    def _action_resume_queue(self, properties: Dict, context: Dict) -> bool:
+    def _action_resume_queue(self, properties: Dict, context: Dict) -> Dict:
         """Resume printer queue."""
-        logger.info(f"Resuming queue for printer {properties.get('printer_id')}")
-        return True
+        printer_id = properties.get('printer_id') or context.get('printer_id')
+        logger.info(f"Resuming queue for printer {printer_id}")
+        return {
+            'printer_id': printer_id,
+            'success': True
+        }
     
-    def _action_clear_queue(self, properties: Dict, context: Dict) -> bool:
+    def _action_clear_queue(self, properties: Dict, context: Dict) -> Dict:
         """Clear printer queue."""
-        logger.info(f"Clearing queue for printer {properties.get('printer_id')}")
-        return True
+        printer_id = properties.get('printer_id') or context.get('printer_id')
+        logger.info(f"Clearing queue for printer {printer_id}")
+        return {
+            'printer_id': printer_id,
+            'jobs_cleared': 0,  # Would be actual count from queue operations
+            'success': True
+        }
     
-    def _action_send_email(self, properties: Dict, context: Dict) -> bool:
+    def _action_send_email(self, properties: Dict, context: Dict) -> Dict:
         """Send email notification."""
         try:
             notif_manager = get_notification_manager()
-            message = self._render_template(properties.get('message', ''), context)
+            # Properties are already rendered, no need to render again
+            message = properties.get('body', properties.get('message', ''))
             subject = properties.get('subject', 'Printer Alert')
             to_email = properties.get('to', '')
             
@@ -295,43 +357,58 @@ class WorkflowEngine:
                 message,
                 {'to': to_email}
             )
-            return True
+            return {
+                'to': to_email,
+                'subject': subject,
+                'success': True
+            }
         except Exception as e:
             logger.error(f"Error sending email: {e}")
-            return False
+            return {'success': False}
     
-    def _action_send_inapp_notification(self, properties: Dict, context: Dict) -> bool:
+    def _action_send_inapp_notification(self, properties: Dict, context: Dict) -> Dict:
         """Send in-app notification."""
         try:
             from app.notifications import create_notification
             
-            message = self._render_template(properties.get('message', ''), context)
+            # Properties are already rendered
+            message = properties.get('message', '')
             title = properties.get('title', 'Workflow Notification')
             notification_type = properties.get('type', 'info')
             
-            create_notification(
+            notification = create_notification(
                 notification_type=notification_type,
                 title=title,
                 message=message,
                 printer_id=context.get('printer_id')
             )
-            return True
+            return {
+                'notification_id': str(notification.get('id', '')) if isinstance(notification, dict) else '',
+                'title': title,
+                'success': True
+            }
         except Exception as e:
             logger.error(f"Error sending in-app notification: {e}")
-            return False
+            return {'success': False}
     
-    def _action_add_printer_note(self, properties: Dict, context: Dict) -> bool:
+    def _action_add_printer_note(self, properties: Dict, context: Dict) -> Dict:
         """Add a note to a printer."""
         try:
             printer_id = properties.get('printer_id') or context.get('printer_id')
-            note = self._render_template(properties.get('message', ''), context)
+            # Properties are already rendered
+            note = properties.get('note', properties.get('message', ''))
             
             if not printer_id or not note:
                 logger.warning("Missing printer_id or message for printer note")
-                return True  # Non-critical, don't fail workflow
+                return {'success': True}  # Non-critical, don't fail workflow
             
+            # Get printer name
             conn = get_db_connection()
             cursor = conn.cursor()
+            cursor.execute("SELECT name FROM printers WHERE id = ?", (printer_id,))
+            row = cursor.fetchone()
+            printer_name = row[0] if row else ''
+            
             cursor.execute(
                 "UPDATE printers SET notes = COALESCE(notes || char(10), '') || ? WHERE id = ?",
                 (f"[Workflow] {note}", printer_id)
@@ -340,64 +417,96 @@ class WorkflowEngine:
             conn.close()
             
             logger.info(f"Added note to printer {printer_id}: {note}")
-            return True
+            return {
+                'printer_id': printer_id,
+                'printer_name': printer_name,
+                'note': note,
+                'success': True
+            }
         except Exception as e:
             logger.error(f"Error adding printer note: {e}")
-            return False
+            return {'success': False}
     
-    def _action_audit_log(self, properties: Dict, context: Dict) -> bool:
+    def _action_audit_log(self, properties: Dict, context: Dict) -> Dict:
         """Create an audit log entry."""
         try:
             from app.models import AuditLog
             
-            message = self._render_template(properties.get('message', 'Workflow action executed'), context)
+            # Properties are already rendered
+            details = properties.get('details', properties.get('message', 'Workflow action executed'))
             action = properties.get('action', 'workflow_action')
             
             AuditLog.log(
                 username='workflow_engine',
                 action=action,
-                details=message,
+                details=details,
                 success=True
             )
-            return True
+            return {
+                'action': action,
+                'details': details,
+                'success': True
+            }
         except Exception as e:
             logger.error(f"Error creating audit log: {e}", exc_info=True)
-            return False
+            return {'success': False}
     
-    def _action_http_request(self, properties: Dict, context: Dict) -> bool:
+    def _action_http_request(self, properties: Dict, context: Dict) -> Dict:
         """Make HTTP request."""
         try:
+            # Properties are already rendered
             url = properties.get('url', '')
             method = properties.get('method', 'POST')
             body = properties.get('body', '{}')
             
-            rendered_body = self._render_template(body, context)
-            
             response = requests.request(
                 method,
                 url,
-                data=rendered_body,
+                data=body,
                 headers={'Content-Type': 'application/json'},
                 timeout=10
             )
             
-            return response.status_code < 400
+            # Try to parse response as JSON
+            try:
+                response_body = response.json()
+            except:
+                response_body = response.text
+            
+            return {
+                'status_code': response.status_code,
+                'response_body': response_body,
+                'success': response.status_code < 400
+            }
         except Exception as e:
             logger.error(f"Error making HTTP request: {e}")
-            return False
+            return {'success': False, 'status_code': 0}
     
-    def _action_print_job(self, properties: Dict, context: Dict) -> bool:
+    def _action_print_job(self, properties: Dict, context: Dict) -> Dict:
         """Submit print job."""
-        # This would integrate with print job submission
-        logger.info(f"Printing to {properties.get('printer_id')}")
-        return True
+        printer_id = properties.get('printer_id') or context.get('printer_id')
+        document_path = properties.get('document_path', '')
+        copies = properties.get('copies', 1)
+        
+        logger.info(f"Printing to {printer_id}: {document_path}")
+        return {
+            'job_id': '',  # Would be actual job ID from print system
+            'printer_id': printer_id,
+            'document_path': document_path,
+            'success': True
+        }
     
-    def _evaluate_conditional(self, conditional_type: str, properties: Dict, context: Dict) -> Optional[str]:
-        """Evaluate conditional and return output handle."""
+    def _evaluate_conditional(self, conditional_type: str, properties: Dict, context: Dict) -> tuple:
+        """
+        Evaluate conditional and return (output_handle, condition_result).
+        
+        Returns:
+            Tuple of (output_handle: str, condition_result: bool)
+        """
         if conditional_type == 'logic.if':
             expression = properties.get('expression', '')
             result = self._evaluate_expression(expression, context)
-            return 'true' if result else 'false'
+            return ('true' if result else 'false', result)
         
         elif conditional_type == 'logic.switch':
             switch_on = properties.get('value', '')
@@ -406,10 +515,10 @@ class WorkflowEngine:
             value = context.get(switch_on)
             for i, case in enumerate(cases):
                 if value == case:
-                    return f'case{i+1}'
-            return 'default'
+                    return (f'case{i+1}', True)
+            return ('default', False)
         
-        return None
+        return (None, False)
     
     def _evaluate_expression(self, expression: str, context: Dict) -> bool:
         """Evaluate a condition expression."""
@@ -434,19 +543,31 @@ class WorkflowEngine:
         return False
     
     def _apply_transform(self, transform_type: str, properties: Dict, context: Dict) -> Dict:
-        """Apply data transformation."""
+        """Apply data transformation. Returns updated context."""
         try:
             if transform_type == 'transform.filter':
                 # Filter: only continue if condition is met
                 expression = properties.get('expression', '')
-                if not self._evaluate_expression(expression, context):
+                matched = self._evaluate_expression(expression, context)
+                context['matched'] = matched
+                if not matched:
                     # Filter didn't match - set a flag for downstream
                     context['_filtered'] = True
                 return context
             
             elif transform_type == 'transform.map_fields':
                 # Map fields: rename or restructure context fields
-                field_mappings = properties.get('mappings', {})
+                mappings_str = properties.get('mappings', '{}')
+                # Parse mappings if it's a string (JSON)
+                if isinstance(mappings_str, str):
+                    try:
+                        import json
+                        field_mappings = json.loads(mappings_str)
+                    except:
+                        field_mappings = {}
+                else:
+                    field_mappings = mappings_str
+                    
                 for source_field, target_field in field_mappings.items():
                     if source_field in context:
                         context[target_field] = context[source_field]
@@ -454,9 +575,13 @@ class WorkflowEngine:
             
             elif transform_type == 'transform.template':
                 # Template: render a template and store result
+                # Properties are already rendered, but template content should be rendered again
                 template = properties.get('template', '')
-                output_field = properties.get('output_field', 'rendered_message')
-                context[output_field] = self._render_template(template, context)
+                output_key = properties.get('output_key', 'result')
+                # The template itself needs to be rendered with context
+                result = self._render_template(template, context)
+                context[output_key] = result
+                context['result'] = result  # Also store in standard 'result' key
                 return context
             
             else:
@@ -467,34 +592,42 @@ class WorkflowEngine:
             logger.error(f"Error applying transform {transform_type}: {e}")
             return context
     
-    def _execute_integration(self, integration_type: str, properties: Dict, context: Dict) -> bool:
-        """Execute integration action."""
+    def _execute_integration(self, integration_type: str, properties: Dict, context: Dict) -> Dict:
+        """Execute integration action. Returns dict with output variables."""
         try:
-            message = self._render_template(properties.get('message', ''), context)
+            # Properties are already rendered by _execute_node
+            message = properties.get('message', '')
             
             if integration_type == 'integration.slack':
                 webhook_url = properties.get('webhook_url', '')
                 response = requests.post(webhook_url, json={'text': message}, timeout=10)
-                return response.status_code == 200
+                return {
+                    'status_code': response.status_code,
+                    'success': response.status_code == 200
+                }
             
             elif integration_type == 'integration.teams':
                 webhook_url = properties.get('webhook_url', '')
                 response = requests.post(webhook_url, json={'text': message}, timeout=10)
-                return response.status_code == 200
+                return {
+                    'status_code': response.status_code,
+                    'success': response.status_code == 200
+                }
             
             elif integration_type == 'integration.discord':
                 webhook_url = properties.get('webhook_url', '')
                 response = requests.post(webhook_url, json={'content': message}, timeout=10)
-                return response.status_code in [200, 204]
+                return {
+                    'status_code': response.status_code,
+                    'success': response.status_code in [200, 204]
+                }
             
             elif integration_type == 'integration.api':
                 # Generic API call integration
                 url = properties.get('url', '')
                 method = properties.get('method', 'POST').upper()
                 headers = properties.get('headers', {})
-                body_template = properties.get('body', '{}')
-                
-                rendered_body = self._render_template(body_template, context)
+                body = properties.get('body', '{}')
                 
                 # Add default content type if not specified
                 if 'Content-Type' not in headers:
@@ -503,25 +636,78 @@ class WorkflowEngine:
                 response = requests.request(
                     method,
                     url,
-                    data=rendered_body,
+                    data=body,
                     headers=headers,
                     timeout=int(properties.get('timeout', 10))
                 )
                 
+                # Try to parse response as JSON
+                try:
+                    response_body = response.json()
+                except:
+                    response_body = response.text
+                
                 logger.info(f"API integration {method} {url} returned {response.status_code}")
-                return response.status_code < 400
+                return {
+                    'status_code': response.status_code,
+                    'response_body': response_body,
+                    'success': response.status_code < 400
+                }
             
-            return False
+            return {'success': False}
         except Exception as e:
             logger.error(f"Error executing integration {integration_type}: {e}")
-            return False
+            return {'success': False}
     
     def _render_template(self, template: str, context: Dict) -> str:
-        """Render template with context variables."""
+        """
+        Render template with context variables.
+        Supports both simple {{variable}} and nested {{object.key}} syntax.
+        """
+        import re
+        
+        def get_nested_value(obj: Dict, path: str) -> Any:
+            """Get a nested value from a dictionary using dot notation."""
+            keys = path.split('.')
+            current = obj
+            for key in keys:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    return None
+            return current
+        
         result = template
-        for key, value in context.items():
-            result = result.replace(f'{{{{{key}}}}}', str(value))
+        # Find all {{variable}} patterns
+        pattern = r'\{\{([a-zA-Z_][a-zA-Z0-9_\.]*)\}\}'
+        matches = re.findall(pattern, template)
+        
+        for match in matches:
+            value = get_nested_value(context, match)
+            if value is not None:
+                result = result.replace(f'{{{{{match}}}}}', str(value))
+        
         return result
+    
+    def _render_properties(self, properties: Dict, context: Dict) -> Dict:
+        """
+        Render all string properties that may contain {{variable}} templates.
+        Returns a new dictionary with rendered values.
+        """
+        rendered = {}
+        for key, value in properties.items():
+            if isinstance(value, str):
+                rendered[key] = self._render_template(value, context)
+            elif isinstance(value, dict):
+                rendered[key] = self._render_properties(value, context)
+            elif isinstance(value, list):
+                rendered[key] = [
+                    self._render_template(item, context) if isinstance(item, str) else item
+                    for item in value
+                ]
+            else:
+                rendered[key] = value
+        return rendered
     
     def _get_node_by_id(self, workflow: Dict, node_id: str) -> Optional[Dict]:
         """Get node by ID from workflow."""

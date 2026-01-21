@@ -225,11 +225,19 @@ export interface WorkflowConfigField {
   options?: WorkflowConfigFieldOption[];
   readOnly?: boolean;
   helperText?: string;
+  supportsDynamic?: boolean;
+}
+
+export interface WorkflowOutputSchema {
+  key: string;
+  type: 'string' | 'number' | 'boolean' | 'object' | string;
+  description: string;
 }
 
 export interface WorkflowRegistryNode {
   id: number;
   key: string;
+  node_key?: string;
   name: string;
   description: string;
   category: 'trigger' | 'action' | 'transform' | 'conditional' | 'integration' | string;
@@ -237,10 +245,12 @@ export interface WorkflowRegistryNode {
   icon?: string;
   inputs: WorkflowPort[];
   outputs: WorkflowPort[];
+  output_schema?: WorkflowOutputSchema[];
   config_schema?: {
     fields: WorkflowConfigField[];
   } | null;
   default_properties?: Record<string, unknown>;
+  allow_multiple_inputs?: boolean;
   enabled: boolean;
   created_at?: string | null;
   updated_at?: string | null;

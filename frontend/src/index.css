@@ -189,3 +189,18 @@
   background: var(--card) !important;
   border: 1px solid color-mix(in oklab, var(--border) 70%, transparent) !important;
 }
+
+/* Selected edge styling */
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 4 !important;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 4 !important;
+  cursor: pointer;
+}
+
+/* Connection line styling during drag */
+.react-flow__connection-path {
+  stroke-width: 3 !important;
+}
