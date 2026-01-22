@@ -672,7 +672,7 @@ export function WorkflowEditorPage() {
         </div>
 
         {selectedNode && (
-          <div className="absolute left-6 top-[5.5rem] z-10 w-[280px] rounded-lg bg-card shadow-lg">
+          <div className="absolute left-6 top-[5.5rem] z-10 w-[280px] rounded-lg bg-card shadow-lg" aria-hidden={false}>
             <div className="border-b border-border/60 px-4 py-3">
               <CardTitle>Properties</CardTitle>
             </div>
@@ -748,8 +748,8 @@ export function WorkflowEditorPage() {
                             <SelectValue placeholder={field.placeholder || (usesPrinterSelect ? 'Select printer' : 'Select')} />
                           </SelectTrigger>
                           <SelectContent>
-                            {selectOptions.map((option: { label: string; value: string }) => (
-                              <SelectItem key={option.value} value={option.value}>
+                            {selectOptions.map((option: { label: string; value: string }, idx: number) => (
+                              <SelectItem key={`${field.key}-${option.value}-${idx}`} value={option.value}>
                                 {option.label}
                               </SelectItem>
                             ))}
@@ -856,6 +856,7 @@ export function WorkflowEditorPage() {
             snapGrid={GRID_SIZE}
             nodesDraggable={canEdit}
             nodesConnectable={canEdit}
+            nodesFocusable={false}
             edgesFocusable={canEdit}
             elementsSelectable={canEdit}
             connectionLineType={ConnectionLineType.SmoothStep}

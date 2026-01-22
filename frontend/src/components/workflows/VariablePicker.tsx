@@ -174,9 +174,9 @@ export function VariablePicker({
                 <div className="mb-2 px-2 text-xs font-semibold text-muted-foreground">Select Value</div>
                 {options
                   .filter(opt => !search || opt.label.toLowerCase().includes(search.toLowerCase()))
-                  .map((option) => (
+                  .map((option, idx) => (
                     <button
-                      key={option.value}
+                      key={`opt-${option.value}-${idx}`}
                       className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-muted"
                       onClick={() => selectOption(option.value)}
                     >
