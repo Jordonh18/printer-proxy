@@ -1,4 +1,4 @@
-printer-proxy for Debian
+continuum for Debian
 ------------------------
 
 First-time setup:
@@ -15,11 +15,11 @@ Creating redirects:
   send jobs to the original IP, but traffic will be forwarded.
 
 Logs:
-  Application logs: /var/log/printer-proxy/
-  Nginx access logs: /var/log/nginx/printer-proxy-access.log
+  Application logs: /var/log/continuum/
+  Nginx access logs: /var/log/nginx/continuum-access.log
 
 Configuration:
-  The application stores its configuration in /var/lib/printer-proxy/
+  The application stores its configuration in /var/lib/continuum/
   No manual configuration file editing is required.
 
  -- Jordon Harrison <jordonh18@users.noreply.github.com>  Sun, 19 Jan 2026 12:00:00 +0000

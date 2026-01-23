@@ -1,10 +1,10 @@
-printer-proxy for Debian
+continuum for Debian
 ------------------------
 
 Building from source:
   dpkg-buildpackage -us -uc -b
 
-Note: This package installs to /opt/printer-proxy rather than standard
+Note: This package installs to /opt/continuum rather than standard
 Debian paths (/usr/share or /usr/lib) because:
 
 1. The application uses a Python virtual environment for dependency

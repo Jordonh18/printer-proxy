@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/Jordonh18/continuum/wiki
+    about: Check the documentation for help and guides
+  - name: Discussions
+    url: https://github.com/Jordonh18/continuum/discussions
+    about: Ask questions and discuss ideas with the community
