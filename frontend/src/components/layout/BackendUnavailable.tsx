@@ -18,7 +18,7 @@ export function BackendUnavailable() {
         </div>
 
         <a
-          href="https://github.com/jordonharrison/printer-proxy/issues"
+          href="https://github.com/jordonh18/continuum/issues"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
