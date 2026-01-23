@@ -44,7 +44,7 @@ class JobHistoryEntry:
         }
 
 
-def get_job_history(printer_id: Optional[int] = None, limit: int = 100) -> List[JobHistoryEntry]:
+def get_history(printer_id: Optional[int] = None, limit: int = 100) -> List[JobHistoryEntry]:
     """Get job history from the database.
     
     Args:
@@ -90,7 +90,7 @@ def get_job_history(printer_id: Optional[int] = None, limit: int = 100) -> List[
         return []
 
 
-def add_job_to_history(
+def add(
     printer_id: int,
     job_id: int,
     document_name: str = "",
@@ -155,7 +155,7 @@ def add_job_to_history(
         return None
 
 
-def get_job_history_stats(printer_id: Optional[int] = None, days: int = 30) -> Dict[str, Any]:
+def get_stats(printer_id: Optional[int] = None, days: int = 30) -> Dict[str, Any]:
     """Get job history statistics.
     
     Args:

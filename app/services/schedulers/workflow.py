@@ -109,7 +109,7 @@ class WorkflowScheduler:
     def _execute_scheduled_workflow(self, workflow_id: str):
         """Execute a scheduled workflow."""
         try:
-            from app.workflow_engine import get_workflow_engine
+            from app.services.workflow_engine import get_workflow_engine
             
             logger.info(f"Executing scheduled workflow {workflow_id}")
             

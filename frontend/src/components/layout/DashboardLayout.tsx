@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
   Printer,
@@ -51,7 +52,19 @@ import {
 } from '@/components/ui/sidebar';
 import { NotificationBell } from './NotificationBell';
 
-const navigationGroups = [
+interface NavItem {
+  name: string;
+  href: string;
+  icon: LucideIcon;
+  roles?: string[];
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const navigationGroups: NavGroup[] = [
   {
     label: 'Overview',
     items: [
@@ -120,6 +133,16 @@ export function DashboardLayout() {
   );
 }
 
+interface AppSidebarProps {
+  user: { username: string; role: string } | null;
+  logout: () => void;
+  location: ReturnType<typeof useLocation>;
+  isSettingsRoute: boolean;
+  filteredNavigationGroups: NavGroup[];
+  activeSettingsTab: string;
+  t: (key: string) => string;
+}
+
 function AppSidebar({
   user,
   logout,
@@ -128,15 +151,7 @@ function AppSidebar({
   filteredNavigationGroups,
   activeSettingsTab,
   t,
-}: {
-  user: any;
-  logout: () => void;
-  location: any;
-  isSettingsRoute: boolean;
-  filteredNavigationGroups: any[];
-  activeSettingsTab: string;
-  t: any;
-}) {
+}: AppSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
   const [isHovering, setIsHovering] = React.useState(false);
   const isCollapsed = state === 'collapsed';

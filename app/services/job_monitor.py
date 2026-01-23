@@ -123,7 +123,7 @@ class JobMonitor:
             
         with self._app.app_context():
             try:
-                from app.printers import get_registry
+                from app.services.printer_registry import get_registry
                 registry = get_registry()
                 printers = registry.get_all()
 
@@ -290,9 +290,9 @@ class JobMonitor:
             List of (event_code, status) tuples for job-related events
         """
         try:
-            from app.event_logs import get_printer_logs
+            from app.services.event_logs import get_logs
             
-            events = get_printer_logs(ip)
+            events = get_logs(ip)
             job_events = []
             
             for event in events:
@@ -306,7 +306,7 @@ class JobMonitor:
             logger.debug(f"Error getting job events for {ip}: {e}")
             return []
             
-    def get_printer_state(self, ip: str) -> Optional[PrinterState]:
+    def get_state(self, ip: str) -> Optional[PrinterState]:
         """Get the current state for a printer."""
         with self._lock:
             return self._printer_states.get(ip)
@@ -323,7 +323,7 @@ class JobMonitor:
             
         with self._app.app_context():
             try:
-                from app.printers import get_registry
+                from app.services.printer_registry import get_registry
                 registry = get_registry()
                 
                 if ip:

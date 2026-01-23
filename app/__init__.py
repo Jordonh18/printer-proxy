@@ -26,8 +26,8 @@ from config.config import (
     JWT_REFRESH_TOKEN_EXPIRES_DAYS
 )
 from app.models import init_db
-from app.auth import login_manager
-from app.rate_limiting import get_ip_for_ratelimit, handle_rate_limit_exceeded
+from app.utils.auth import login_manager
+from app.utils.rate_limiting import get_ip_for_ratelimit, handle_rate_limit_exceeded
 
 
 jwt = JWTManager()
@@ -93,41 +93,41 @@ def create_app() -> Flask:
     init_db()
     
     # Initialize health check tables
-    from app.health_check import init_health_check_tables, start_health_checks
+    from app.services.health_check import init_health_check_tables, start_health_checks
     init_health_check_tables()
     
     # Start background health checks (only in production, not in reloader)
     if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         # Only start printer polling services if printers exist
-        from app.printers import get_registry
+        from app.services.printer_registry import get_registry
         registry = get_registry()
         if registry.has_printers():
             start_health_checks()
             
             # Start the job monitor for print job detection
-            from app.job_monitor import init_job_monitor
+            from app.services.job_monitor import init_job_monitor
             init_job_monitor(app, start=True)
         else:
             app.logger.info("No printers registered; deferring polling services")
         
         # Start the auto-update checker
-        from app.updater import init_updater
+        from app.services.updater import init_updater
         init_updater(start_background=True)
         
         # Start the weekly report scheduler
-        from app.notifications import start_weekly_reports
+        from app.services.notification_sender import start_weekly_reports
         start_weekly_reports()
 
         # Start group redirect scheduler
-        from app.group_redirect_scheduler import init_group_redirect_scheduler
+        from app.services.schedulers.group_redirect import init_group_redirect_scheduler
         init_group_redirect_scheduler(start_background=True)
 
         # Start printer redirect scheduler
-        from app.printer_redirect_scheduler import init_printer_redirect_scheduler
+        from app.services.schedulers.printer_redirect import init_printer_redirect_scheduler
         init_printer_redirect_scheduler(start_background=True)
         
         # Start workflow scheduler
-        from app.workflow_scheduler import reload_workflow_schedules
+        from app.services.schedulers.workflow import reload_workflow_schedules
         reload_workflow_schedules()
     
     # Setup logging
@@ -247,7 +247,7 @@ def register_error_handlers(app: Flask):
     """Register error handlers that return JSON for API errors."""
     from flask import jsonify, request
     from werkzeug.exceptions import TooManyRequests
-    from app.rate_limiting import handle_rate_limit_exceeded
+    from app.utils.rate_limiting import handle_rate_limit_exceeded
     
     # Rate limit error handler
     app.errorhandler(429)(handle_rate_limit_exceeded)

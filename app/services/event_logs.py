@@ -498,7 +498,7 @@ def categorize_hp_event_code(code: int) -> tuple:
         return ('info', f'Code {code}', f'HP event code {code}')
 
 
-def get_printer_logs(ip: str, community: str = 'public') -> List[PrinterEvent]:
+def get_logs(ip: str, community: str = 'public') -> List[PrinterEvent]:
     """Get logs/events for a printer by IP.
     
     Queries multiple SNMP OIDs to collect printer alerts/logs:
@@ -761,6 +761,6 @@ def get_printer_logs(ip: str, community: str = 'public') -> List[PrinterEvent]:
 
 
 # Backwards compatibility alias
-def get_printer_errors(ip: str) -> List[PrinterEvent]:
-    """Alias for get_printer_logs."""
-    return get_printer_logs(ip)
+def get_errors(ip: str) -> List[PrinterEvent]:
+    """Alias for get_logs."""
+    return get_logs(ip)

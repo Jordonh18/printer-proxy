@@ -338,7 +338,7 @@ def get_collector() -> PrinterStatsCollector:
     return _collector
 
 
-def get_printer_stats(ip: str) -> PrinterStats:
+def get_stats(ip: str) -> PrinterStats:
     """Get statistics for a printer by IP."""
     return get_collector().get_stats(ip)
 

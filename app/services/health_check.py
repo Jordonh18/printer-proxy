@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
 from app.models import get_db_connection
-from app.printers import get_registry
+from app.services.printer_registry import get_registry
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,7 @@ class HealthChecker:
         conn.commit()
         conn.close()
     
-    def get_cached_status(self, printer_id: str) -> Optional[Dict]:
+    def get_status(self, printer_id: str) -> Optional[Dict]:
         """Get cached status for a printer."""
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -190,7 +190,7 @@ class HealthChecker:
         conn.close()
         return [dict(row) for row in rows]
     
-    def cleanup_old_history(self, days: int = 30):
+    def cleanup(self, days: int = 30):
         """Remove health check history older than specified days."""
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -265,7 +265,7 @@ class HealthCheckScheduler:
                 
                 try:
                     # Get previous status before checking
-                    previous_status = self.checker.get_cached_status(printer.id)
+                    previous_status = self.checker.get_status(printer.id)
                     was_online = previous_status and previous_status.get('is_online', False)
                     
                     result = self.checker.check_printer(printer.id, printer.ip)
@@ -277,14 +277,14 @@ class HealthCheckScheduler:
                         
                         # Send offline notification if status changed from online to offline
                         if was_online:
-                            from app.notifications import notify_printer_offline
+                            from app.services.notification_sender import notify_printer_offline
                             try:
                                 notify_printer_offline(printer.name, printer.ip)
                             except Exception as e:
                                 logger.error(f"Failed to send offline notification: {e}")
                             
                             # Trigger workflows for printer offline
-                            from app.workflow_engine import trigger_workflows_for_event
+                            from app.services.workflow_engine import trigger_workflows_for_event
                             try:
                                 trigger_workflows_for_event('printer_offline', {
                                     'printer_id': printer.id,
@@ -297,14 +297,14 @@ class HealthCheckScheduler:
                     else:
                         # Printer is online - send recovery notification if it was offline before
                         if previous_status and not was_online:
-                            from app.notifications import notify_printer_online
+                            from app.services.notification_sender import notify_printer_online
                             try:
                                 notify_printer_online(printer.name, printer.ip)
                             except Exception as e:
                                 logger.error(f"Failed to send online notification: {e}")
                             
                             # Trigger workflows for printer online
-                            from app.workflow_engine import trigger_workflows_for_event
+                            from app.services.workflow_engine import trigger_workflows_for_event
                             try:
                                 trigger_workflows_for_event('printer_online', {
                                     'printer_id': printer.id,
@@ -329,7 +329,7 @@ class HealthCheckScheduler:
         # Clean up once per day (approximated by checking a random condition)
         import random
         if random.random() < (1.0 / (24 * 60)):  # ~once per day at 1-min interval
-            deleted = self.checker.cleanup_old_history(30)
+            deleted = self.checker.cleanup(30)
             if deleted:
                 logger.info(f"Cleaned up {deleted} old health check records")
 
@@ -360,13 +360,13 @@ def stop_health_checks():
         _scheduler.stop()
 
 
-def get_printer_health(printer_id: str) -> Optional[Dict]:
+def get_status(printer_id: str) -> Optional[Dict]:
     """Get the latest health status for a printer."""
     checker = HealthChecker()
-    return checker.get_cached_status(printer_id)
+    return checker.get_status(printer_id)
 
 
-def get_printer_health_history(printer_id: str, limit: int = 100) -> List[Dict]:
+def get_history(printer_id: str, limit: int = 100) -> List[Dict]:
     """Get health check history for a printer."""
     checker = HealthChecker()
     return checker.get_history(printer_id, limit)

@@ -1,8 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { BackendStatusProvider, useBackendStatus } from '@/contexts/BackendStatusContext';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { BackendUnavailable } from '@/components/layout/BackendUnavailable';
 import { LoginPage } from '@/pages/LoginPage';
 import { SetupPage } from '@/pages/SetupPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -39,10 +41,33 @@ function NotificationStreamProvider({ children }: { children: React.ReactNode })
   return <>{children}</>;
 }
 
+// Wrapper that checks backend status before rendering children
+function BackendStatusGate({ children }: { children: React.ReactNode }) {
+  const { isBackendAvailable, isChecking } = useBackendStatus();
+
+  // Show loading state during initial check
+  if (isChecking && !isBackendAvailable) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500" />
+      </div>
+    );
+  }
+
+  // Show backend unavailable page if backend is down
+  if (!isBackendAvailable) {
+    return <BackendUnavailable />;
+  }
+
+  return <>{children}</>;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
+      <BackendStatusProvider>
+        <BackendStatusGate>
+          <AuthProvider>
         <NotificationStreamProvider>
           <BrowserRouter>
             <Routes>
@@ -125,6 +150,8 @@ function App() {
           <Toaster />
         </NotificationStreamProvider>
       </AuthProvider>
+        </BackendStatusGate>
+      </BackendStatusProvider>
     </QueryClientProvider>
   );
 }

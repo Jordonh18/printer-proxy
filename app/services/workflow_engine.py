@@ -11,8 +11,8 @@ from datetime import datetime
 import requests
 from flask import current_app
 from app.models import get_db_connection
-from app.notification_manager import get_notification_manager
-from app.network import get_network_manager
+from app.services.notification_manager import get_notification_manager
+from app.services.network_manager import get_network_manager
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +369,7 @@ class WorkflowEngine:
     def _action_send_inapp_notification(self, properties: Dict, context: Dict) -> Dict:
         """Send in-app notification."""
         try:
-            from app.notifications import create_notification
+            from app.services.notification_sender import create_notification
             
             # Properties are already rendered
             message = properties.get('message', '')

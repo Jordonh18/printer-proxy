@@ -119,7 +119,7 @@ class PrinterRegistry:
         except Exception:
             return False
     
-    def get_printer_status(self, printer: Printer, use_cache: bool = True) -> Dict[str, Any]:
+    def get_status(self, printer: Printer, use_cache: bool = True) -> Dict[str, Any]:
         """Get comprehensive status for a printer.
         
         Args:
@@ -180,19 +180,23 @@ class PrinterRegistry:
             # Redirected printers are considered offline
             icmp_reachable = False
             tcp_reachable = False
+            status_state = "offline"
         elif use_cache:
             # Use cached status from background health checks (FAST)
             if cached:
                 icmp_reachable = cached.get('icmp_ok', False)
                 tcp_reachable = cached.get('tcp_9100_ok', False)
+                status_state = "online" if (icmp_reachable or tcp_reachable) else "offline"
             else:
-                # No cache yet, assume unknown (will be updated by background check)
-                icmp_reachable = False
-                tcp_reachable = False
+                # No cache yet, show as probing (health check will update soon)
+                icmp_reachable = None
+                tcp_reachable = None
+                status_state = "probing"
         else:
             # Live check (SLOW - only use for specific operations)
             icmp_reachable = self.check_icmp_reachability(printer.ip)
             tcp_reachable = self.check_tcp_reachability(printer.ip)
+            status_state = "online" if (icmp_reachable or tcp_reachable) else "offline"
 
         return {
             "printer": printer.to_dict(),
@@ -200,7 +204,8 @@ class PrinterRegistry:
             "status": {
                 "icmp_reachable": icmp_reachable,
                 "tcp_reachable": tcp_reachable,
-                "is_online": icmp_reachable or tcp_reachable,
+                "is_online": icmp_reachable or tcp_reachable if icmp_reachable is not None else None,
+                "state": status_state,
                 "is_redirected": is_redirected,
                 "is_redirect_target": is_target,
                 "redirect_info": {
@@ -238,7 +243,7 @@ class PrinterRegistry:
             for row in rows
         }
     
-    def get_all_statuses(self, use_cache: bool = True) -> List[Dict[str, Any]]:
+    def get_statuses(self, use_cache: bool = True) -> List[Dict[str, Any]]:
         """Get status for all printers.
         
         Args:

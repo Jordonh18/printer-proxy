@@ -10,8 +10,8 @@ from datetime import datetime
 from typing import Optional, List
 
 from app.models import get_db_connection, ActiveRedirect
-from app.printers import get_registry
-from app.network import get_network_manager
+from app.services.printer_registry import get_registry
+from app.services.network_manager import get_network_manager
 
 logger = logging.getLogger(__name__)
 

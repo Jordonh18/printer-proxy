@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
-from app.settings import get_settings_manager
+from app.services.settings import get_settings_manager
 from app.models import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -160,7 +160,7 @@ class NotificationManager:
     Unified notification manager that handles all notification channels.
     
     Usage:
-        from app.notifications import notify
+        from app.services.notification_sender import notify
         
         # Send to all enabled channels
         notify("Printer Alert", "Printer HP-LaserJet is offline!")
@@ -300,7 +300,7 @@ def notify(subject: str, message: str, html_message: Optional[str] = None) -> Di
     This is the primary interface for sending notifications throughout the app.
     
     Usage:
-        from app.notifications import notify
+        from app.services.notification_sender import notify
         
         # Simple notification
         notify("Alert", "Something happened!")
@@ -321,7 +321,7 @@ def notify(subject: str, message: str, html_message: Optional[str] = None) -> Di
 
 def notify_printer_offline(printer_name: str, printer_ip: str):
     """Send notification when a printer goes offline to users with offline_alerts enabled."""
-    from app.notification_manager import get_notification_manager as get_notif_mgr
+    from app.services.notification_manager import get_notification_manager as get_notif_mgr
     
     users = get_users_with_preference('offline_alerts')
     if not users:
@@ -386,7 +386,7 @@ def notify_printer_offline(printer_name: str, printer_ip: str):
 
 def notify_printer_online(printer_name: str, printer_ip: str):
     """Send notification when a printer comes back online to users with offline_alerts enabled."""
-    from app.notification_manager import get_notification_manager as get_notif_mgr
+    from app.services.notification_manager import get_notification_manager as get_notif_mgr
     
     users = get_users_with_preference('offline_alerts')
     if not users:
@@ -768,10 +768,10 @@ def send_weekly_report():
 
     subscriptions = get_group_subscriptions('weekly_reports')
 
-    from app.printers import get_registry
+    from app.services.printer_registry import get_registry
     registry = get_registry()
     all_printers = registry.get_all()
-    all_statuses = registry.get_all_statuses()
+    all_statuses = registry.get_statuses()
 
     settings = get_settings_manager().get_all()
     if not settings.get('notifications', {}).get('smtp', {}).get('enabled'):

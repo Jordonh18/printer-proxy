@@ -13,20 +13,20 @@ from flask_jwt_extended.exceptions import JWTExtendedException
 
 import sqlite3
 from app.models import AuditLog, ActiveRedirect, GroupRedirectSchedule, PrinterRedirectSchedule, PrinterGroup, User, UserSession, WorkflowRegistryNode, Workflow, get_db_connection
-from app.auth import authenticate_user, validate_password_strength, hash_password, verify_password
-from app.api_tokens import get_available_permissions
-from app.notification_manager import get_notification_manager
-from app.workflow_engine import get_workflow_engine
+from app.utils.auth import authenticate_user, validate_password_strength, hash_password, verify_password
+from app.utils.api_tokens import get_available_permissions
+from app.services.notification_manager import get_notification_manager
+from app.services.workflow_engine import get_workflow_engine
 import queue
-from app.printers import get_registry, Printer
-from app.printer_stats import get_printer_stats
+from app.services.printer_registry import get_registry, Printer
+from app.services.printer_stats import get_stats
 import time
 import secrets
 import json
 import pyotp
 import bcrypt
-from app.network import get_network_manager
-from app.discovery import get_discovery
+from app.services.network_manager import get_network_manager
+from app.services.discovery import get_discovery
 from config.config import (
     DEFAULT_PORT,
     MIN_PASSWORD_LENGTH,
@@ -254,8 +254,8 @@ def api_workflow_registry_list():
         include_disabled = False
     nodes = WorkflowRegistryNode.get_all(include_disabled=include_disabled)
 
-    from app.settings import get_settings_manager
-    from app.notifications import SMTPNotificationChannel
+    from app.services.settings import get_settings_manager
+    from app.services.notification_sender import SMTPNotificationChannel
 
     settings = get_settings_manager().get_all()
     smtp_channel = SMTPNotificationChannel()
@@ -383,7 +383,7 @@ def api_workflows_update(workflow_id: str):
     
     # Update scheduler if workflow has schedule trigger
     try:
-        from app.workflow_scheduler import get_workflow_scheduler
+        from app.services.schedulers.workflow import get_workflow_scheduler
         import json
         
         # workflow['nodes'] is already parsed by get_by_id()
@@ -410,7 +410,7 @@ def api_workflows_update(workflow_id: str):
 def api_workflows_delete(workflow_id: str):
     # Unschedule before deleting
     try:
-        from app.workflow_scheduler import get_workflow_scheduler
+        from app.services.schedulers.workflow import get_workflow_scheduler
         scheduler = get_workflow_scheduler()
         scheduler.unschedule_workflow(workflow_id)
     except Exception as e:
@@ -671,7 +671,7 @@ def api_auth_logout():
 def api_auth_setup():
     """Check if setup is needed or create initial admin."""
     from app.models import get_db_connection
-    from app.auth import create_initial_admin
+    from app.utils.auth import create_initial_admin
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -742,7 +742,7 @@ def api_info():
 def api_printers():
     """Get all printers with status."""
     registry = get_registry()
-    return jsonify(registry.get_all_statuses())
+    return jsonify(registry.get_statuses())
 
 
 @api_bp.route('/printers/<printer_id>')
@@ -755,7 +755,7 @@ def api_printer(printer_id):
     if not printer:
         return jsonify({'error': 'Printer not found'}), 404
     
-    return jsonify(registry.get_printer_status(printer))
+    return jsonify(registry.get_status(printer))
 
 
 @api_bp.route('/printers', methods=['POST'])
@@ -1381,7 +1381,7 @@ def api_printer_redirect_schedule_delete(schedule_id: int):
 @api_auth_required
 def api_printer_stats(printer_id):
     """Get SNMP stats for a printer."""
-    from app.printer_stats import get_printer_stats, get_toner_levels
+    from app.services.printer_stats import get_stats, get_toner_levels
     
     registry = get_registry()
     printer = registry.get_by_id(printer_id)
@@ -1389,7 +1389,7 @@ def api_printer_stats(printer_id):
     if not printer:
         return jsonify({'error': 'Printer not found'}), 404
     
-    stats = get_printer_stats(printer.ip)
+    stats = get_stats(printer.ip)
     toner = get_toner_levels(printer.ip)
     
     return jsonify({
@@ -1402,10 +1402,10 @@ def api_printer_stats(printer_id):
 @api_auth_required
 def api_printer_health(printer_id):
     """Get health status for a printer."""
-    from app.health_check import get_printer_health, get_printer_health_history
+    from app.services.health_check import get_status, get_history
     
-    health = get_printer_health(printer_id)
-    history = get_printer_health_history(printer_id, limit=24)
+    health = get_status(printer_id)
+    history = get_history(printer_id, limit=24)
     
     return jsonify({
         'current': health,
@@ -1423,7 +1423,7 @@ def api_printer_refresh(printer_id):
     if not printer:
         return jsonify({'error': 'Printer not found'}), 404
     
-    from app.health_check import HealthChecker
+    from app.services.health_check import HealthChecker
     checker = HealthChecker()
     result = checker.check_printer(printer_id, printer.ip)
     checker.save_result(result)
@@ -1442,7 +1442,7 @@ def api_printer_refresh(printer_id):
 @api_auth_required
 def api_printer_queue(printer_id):
     """Get current print queue for a printer."""
-    from app.print_queue import get_print_queue
+    from app.services.print_queue import get_queue
 
     registry = get_registry()
     printer = registry.get_by_id(printer_id)
@@ -1450,7 +1450,7 @@ def api_printer_queue(printer_id):
     if not printer:
         return jsonify({'error': 'Printer not found'}), 404
 
-    jobs = get_print_queue(printer.ip)
+    jobs = get_queue(printer.ip)
     return jsonify({'jobs': [job.to_dict() for job in jobs]})
 
 
@@ -1469,7 +1469,7 @@ def api_printer_job_history(printer_id):
 @api_auth_required
 def api_printer_logs(printer_id):
     """Get device event logs for a printer."""
-    from app.event_logs import get_printer_logs
+    from app.services.event_logs import get_logs
 
     registry = get_registry()
     printer = registry.get_by_id(printer_id)
@@ -1477,7 +1477,7 @@ def api_printer_logs(printer_id):
     if not printer:
         return jsonify({'error': 'Printer not found'}), 404
 
-    events = get_printer_logs(printer.ip)
+    events = get_logs(printer.ip)
     return jsonify({'events': [event.to_dict() for event in events]})
 
 
@@ -2069,7 +2069,7 @@ _dashboard_analytics_cache = {
 def api_dashboard_status():
     """Get all printer statuses for dashboard."""
     registry = get_registry()
-    return jsonify(registry.get_all_statuses(use_cache=True))
+    return jsonify(registry.get_statuses(use_cache=True))
 
 
 @api_bp.route('/dashboard/stats')
@@ -2077,7 +2077,7 @@ def api_dashboard_status():
 def api_dashboard_stats():
     """Get dashboard statistics."""
     registry = get_registry()
-    printers = registry.get_all_statuses()
+    printers = registry.get_statuses()
     redirects = ActiveRedirect.get_all()
     
     online_count = sum(1 for p in printers if p.get('is_online'))
@@ -2127,7 +2127,7 @@ def api_dashboard_analytics():
     # Top printers by SNMP total pages + uptime
     snmp_pages = []
     for printer in printers:
-        stats = get_printer_stats(printer.ip)
+        stats = get_stats(printer.ip)
         total_pages = stats.total_pages if stats and stats.total_pages is not None else 0
         uptime_hours = _parse_uptime_hours(stats.uptime) if stats and stats.uptime else 0.0
         snmp_pages.append({
@@ -2241,7 +2241,7 @@ def api_update_start():
 @api_role_required('admin')
 def api_settings():
     """Get all settings."""
-    from app.settings import get_settings_manager
+    from app.services.settings import get_settings_manager
     settings = get_settings_manager().get_all()
     return jsonify({'success': True, 'settings': settings})
 
@@ -2250,7 +2250,7 @@ def api_settings():
 @api_role_required('admin')
 def api_settings_smtp():
     """Get or update SMTP notification settings."""
-    from app.settings import get_settings_manager
+    from app.services.settings import get_settings_manager
     manager = get_settings_manager()
     
     if request.method == 'GET':
@@ -2288,8 +2288,8 @@ def api_settings_smtp():
 @api_role_required('admin')
 def api_settings_smtp_test():
     """Send a test email using current SMTP settings."""
-    from app.notifications import SMTPNotificationChannel
-    from app.settings import get_settings_manager
+    from app.services.notification_sender import SMTPNotificationChannel
+    from app.services.settings import get_settings_manager
 
     data = request.get_json() or {}
     if data:

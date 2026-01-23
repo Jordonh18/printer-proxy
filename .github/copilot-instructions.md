@@ -19,7 +19,7 @@ Continuum is a Flask + React web application that redirects network print traffi
 
 - **React 18** with TypeScript
 - **Vite** for build tooling
-- **Tailwind CSS** with Supabase-inspired emerald theme
+- **Tailwind CSS** for styling
 - **TanStack Query** for data fetching
 - **React Router DOM** for client-side routing
 - **JWT Authentication** via flask-jwt-extended

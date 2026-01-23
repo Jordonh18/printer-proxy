@@ -99,7 +99,7 @@ if _is_installed:
 else:
     BASE_DIR = Path(__file__).parent.parent
     CONFIG_DIR = BASE_DIR / 'config'
-    DATA_DIR = BASE_DIR / 'data'
+    DATA_DIR = BASE_DIR / 'app' / 'data'
     LOG_DIR = BASE_DIR / 'logs'
 
 # Ensure directories exist

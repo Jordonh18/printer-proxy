@@ -745,7 +745,7 @@ export function NetworkingPage() {
       <Dialog open={showSudoPrompt} onOpenChange={setShowSudoPrompt}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Sudo Authentication Required</DialogTitle>
+            <DialogTitle>Authentication Required</DialogTitle>
             <DialogDescription>
               Network operations require elevated privileges. Please enter your password to continue.
             </DialogDescription>

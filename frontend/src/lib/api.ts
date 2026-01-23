@@ -45,12 +45,44 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor to handle token refresh
+// Track consecutive network failures
+let consecutiveNetworkFailures = 0;
+const MAX_FAILURES_BEFORE_UNAVAILABLE = 3;
+
+// Callback for notifying backend status changes
+let onBackendStatusChange: ((available: boolean) => void) | null = null;
+
+export function setBackendStatusCallback(callback: (available: boolean) => void) {
+  onBackendStatusChange = callback;
+}
+
+// Response interceptor to handle token refresh and network errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Reset failure count on successful response
+    consecutiveNetworkFailures = 0;
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
     const requestUrl = (originalRequest?.url || '').toString();
+
+    // Check if this is a network error (no response from server)
+    if (!error.response && error.code === 'ERR_NETWORK') {
+      consecutiveNetworkFailures++;
+      
+      // After multiple failures, notify that backend is unavailable
+      if (consecutiveNetworkFailures >= MAX_FAILURES_BEFORE_UNAVAILABLE) {
+        if (onBackendStatusChange) {
+          onBackendStatusChange(false);
+        }
+      }
+      
+      return Promise.reject(error);
+    }
+
+    // Reset failure count if we got any response (even errors)
+    consecutiveNetworkFailures = 0;
 
     if (requestUrl.includes('/auth/login') || requestUrl.includes('/auth/refresh')) {
       return Promise.reject(error);
