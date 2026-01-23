@@ -25,7 +25,7 @@ from config.config import (
     JWT_ACCESS_TOKEN_EXPIRES_HOURS,
     JWT_REFRESH_TOKEN_EXPIRES_DAYS
 )
-from app.models import init_db
+from app.models.base import init_db
 from app.utils.auth import login_manager
 from app.utils.rate_limiting import get_ip_for_ratelimit, handle_rate_limit_exceeded
 
