@@ -1,6 +1,6 @@
-# Printer Proxy APT Repository
+# Continuum APT Repository
 
-This directory contains the APT repository for Printer Proxy, hosted via GitHub Pages.
+This directory contains the APT repository for Continuum, hosted via GitHub Pages.
 
 ## Repository URL
 
@@ -12,14 +12,14 @@ This directory contains the APT repository for Printer Proxy, hosted via GitHub 
 
 ```bash
 # Add the GPG signing key
-curl -fsSL https://apt.jordonh.me/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/printer-proxy.gpg
+curl -fsSL https://apt.jordonh.me/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/continuum.gpg
 
 # Add the repository
-echo "deb [signed-by=/usr/share/keyrings/printer-proxy.gpg] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list
+echo "deb [signed-by=/usr/share/keyrings/continuum.gpg] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/continuum.list
 
 # Install
 sudo apt update
-sudo apt install printer-proxy
+sudo apt install continuum
 ```
 
 ## Structure
@@ -39,7 +39,7 @@ apt-repo/
 │               └── Packages.gz   # Compressed package index
 └── pool/
     └── main/
-        └── printer-proxy_*.deb  # Package files
+        └── continuum_*.deb  # Package files
 ```
 
 ## GPG Signing

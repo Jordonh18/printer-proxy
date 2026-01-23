@@ -47,7 +47,7 @@ def create_app() -> Flask:
     # Get the base directory (parent of app/)
     base_dir = Path(__file__).resolve().parent.parent
     
-    app = Flask('printer-proxy', 
+    app = Flask('continuum', 
                 template_folder=str(base_dir / 'templates'),
                 static_folder=str(base_dir / 'static'))
     
@@ -143,7 +143,7 @@ def create_app() -> Flask:
     # Error handlers
     register_error_handlers(app)
     
-    app.logger.info("Printer Proxy application started")
+    app.logger.info("Continuum application started")
     
     return app
 

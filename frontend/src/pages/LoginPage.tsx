@@ -110,7 +110,7 @@ export function LoginPage() {
             }}
           />
           <div className="px-10 py-8 relative z-10">
-            <span className="text-sm font-semibold tracking-wide text-background/80">Printer Proxy</span>
+            <span className="text-sm font-semibold tracking-wide text-background/80">Continuum</span>
           </div>
           <div className="flex flex-1 flex-col justify-between px-10 pb-12 relative z-10">
             <div className="max-w-md space-y-6 pt-10">

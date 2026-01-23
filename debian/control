@@ -1,4 +1,4 @@
-Source: printer-proxy
+Source: continuum
 Section: net
 Priority: optional
 Maintainer: Jordon Harrison <jordonh18@users.noreply.github.com>
@@ -9,12 +9,12 @@ Build-Depends: debhelper-compat (= 13),
                nodejs,
                npm
 Standards-Version: 4.6.2
-Homepage: https://github.com/Jordonh18/printer-proxy
-Vcs-Browser: https://github.com/Jordonh18/printer-proxy
-Vcs-Git: https://github.com/Jordonh18/printer-proxy.git
+Homepage: https://github.com/Jordonh18/continuum
+Vcs-Browser: https://github.com/Jordonh18/continuum
+Vcs-Git: https://github.com/Jordonh18/continuum.git
 Rules-Requires-Root: no
 
-Package: printer-proxy
+Package: continuum
 Architecture: all
 Depends: ${python3:Depends},
          ${misc:Depends},
@@ -32,7 +32,7 @@ Depends: ${python3:Depends},
 Recommends: snmp
 Suggests: ufw
 Description: Web-based network printer traffic redirection tool
- Printer Proxy is a web application that redirects network print traffic
+ Continuum is a web application that redirects network print traffic
  from one printer IP address to another using NAT/iptables rules. This
  allows print clients to continue using the same IP address when a printer
  fails, while traffic is transparently forwarded to a working backup printer.

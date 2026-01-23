@@ -1,8 +1,8 @@
-# Copilot Instructions for Printer Proxy
+# Copilot Instructions for Continuum
 
 ## Project Overview
 
-Printer Proxy is a Flask + React web application that redirects network print traffic via NAT/iptables. When a printer fails, clients continue printing to the same IP while traffic is forwarded to a working printer.
+Continuum is a Flask + React web application that redirects network print traffic via NAT/iptables. When a printer fails, clients continue printing to the same IP while traffic is forwarded to a working printer.
 
 ## Architecture
 
@@ -91,9 +91,9 @@ JWT tokens for API authentication via flask-jwt-extended. Bcrypt password hashin
 
 | Path | Purpose |
 |------|---------|
-| `/opt/printer-proxy/` | Application code |
-| `/var/lib/printer-proxy/` | SQLite database, secrets |
-| `/var/log/printer-proxy/` | Application logs |
+| `/opt/continuum/` | Application code |
+| `/var/lib/continuum/` | SQLite database, secrets |
+| `/var/log/continuum/` | Application logs |
 
 Config auto-detects install vs development mode in [config/config.py](config/config.py#L82).
 

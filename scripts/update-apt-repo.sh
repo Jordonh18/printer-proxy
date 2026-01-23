@@ -29,7 +29,7 @@ log_error() { echo -e "${RED}✗${NC} $1"; }
 
 # Find the .deb file to add
 if [[ -n "${1:-}" ]]; then
-    DEB_FILE="$BUILDS_DIR/printer-proxy_${1}_all.deb"
+    DEB_FILE="$BUILDS_DIR/continuum_${1}_all.deb"
     if [[ ! -f "$DEB_FILE" ]]; then
         log_error "Package not found: $DEB_FILE"
         exit 1
@@ -119,14 +119,14 @@ PACKAGES_GZ_SHA256=$(sha256sum "$DISTS_DIR/Packages.gz" | awk '{print $1}')
 DATE=$(date -R)
 
 cat > "$APT_REPO_DIR/dists/stable/Release" << EOF
-Origin: Printer Proxy
-Label: Printer Proxy
+Origin: Continuum
+Label: Continuum
 Suite: stable
 Codename: stable
 Date: $DATE
 Architectures: all
 Components: main
-Description: Printer Proxy APT Repository
+Description: Continuum APT Repository
 MD5Sum:
  $PACKAGES_MD5 $PACKAGES_SIZE main/binary-all/Packages
  $PACKAGES_GZ_MD5 $PACKAGES_GZ_SIZE main/binary-all/Packages.gz
@@ -149,6 +149,6 @@ echo "  1. Commit and push the apt-repo directory"
 echo "  2. Enable GitHub Pages for the apt-repo directory"
 echo "  3. Users can install with:"
 echo ""
-echo '     echo "deb [trusted=yes] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list'
-echo "     sudo apt update && sudo apt install printer-proxy"
+echo '     echo "deb [trusted=yes] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/continuum.list'
+echo "     sudo apt update && sudo apt install continuum"
 echo ""

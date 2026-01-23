@@ -1,5 +1,5 @@
 /**
- * NetworkingPage - Comprehensive view of network state managed by Printer Proxy
+ * NetworkingPage - Comprehensive view of network state managed by Continuum
  */
 
 import { useState, useEffect } from 'react';

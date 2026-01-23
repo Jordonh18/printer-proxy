@@ -1,5 +1,5 @@
 """
-Workflow execution engine for Printer Proxy.
+Workflow execution engine for Continuum.
 Handles workflow triggers, execution, and action processing.
 """
 import json

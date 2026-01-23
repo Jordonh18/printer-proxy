@@ -1,15 +1,15 @@
-Package: printer-proxy
+Package: continuum
 Version: 1.4.24
 Architecture: all
 Maintainer: jordonh18 <jordonh18@users.noreply.github.com>
 Depends: python3 (>= 3.9), python3-venv, python3-pip, iptables, iproute2, iputils-ping, arping, nginx, openssl
 Priority: optional
 Section: admin
-Filename: pool/main/printer-proxy_1.4.24_all.deb
+Filename: pool/main/continuum_1.4.24_all.deb
 Size: 163928
 MD5sum: 34387565f367a795e8f7feac9bae5692
 SHA256: 796d640a8f4b85ac7651b1ee1aef58e2aa95a3738ad8dad64e5c4fa66722834c
-Description: Printer Proxy
+Description: Continuum
  A web-based tool to redirect print traffic from one network printer
  to another without reconfiguring clients.
  .

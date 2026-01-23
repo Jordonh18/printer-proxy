@@ -1,4 +1,4 @@
-# Printer Proxy
+# Continuum
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -8,25 +8,25 @@ A network traffic redirection solution for network printers that uses NAT and ip
 
 ## Installation
 
-Install Printer Proxy via the official APT repository:
+Install Continuum via the official APT repository:
 
 ```bash
 # 1. Add the GPG signing key
-curl -fsSL https://apt.jordonh.me/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/printer-proxy.gpg
+curl -fsSL https://apt.jordonh.me/gpg-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/continuum.gpg
 
 # 2. Add the repository
-echo "deb [signed-by=/usr/share/keyrings/printer-proxy.gpg] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/printer-proxy.list
+echo "deb [signed-by=/usr/share/keyrings/continuum.gpg] https://apt.jordonh.me stable main" | sudo tee /etc/apt/sources.list.d/continuum.list
 
 # 3. Install
 sudo apt update
-sudo apt install printer-proxy
+sudo apt install continuum
 ```
 
 ## Upgrading
 
 ```bash
 sudo apt update
-sudo apt upgrade printer-proxy
+sudo apt upgrade continuum
 ```
 
 ## Initial Setup
@@ -38,13 +38,13 @@ sudo apt upgrade printer-proxy
 
 ## Overview
 
-Printer Proxy operates at the network layer to intercept and redirect TCP print traffic destined for a failed printer to an alternative target. When a printer fails, the proxy server claims the failed printer's IP address as a secondary interface and applies DNAT rules to forward incoming connections to a working printer.
+Continuum operates at the network layer to intercept and redirect TCP print traffic destined for a failed printer to an alternative target. When a printer fails, the proxy server claims the failed printer's IP address as a secondary interface and applies DNAT rules to forward incoming connections to a working printer.
 
 ### How It Works
 
 ```
                            ┌──────────────────────────────────────┐
-                           │         Printer Proxy Server         │
+                           │         Continuum Server         │
                            │                                      │
                            │  1. Claims 192.168.1.10 as secondary │
                            │  2. Applies DNAT rule in iptables    │
@@ -95,8 +95,8 @@ Printer Proxy operates at the network layer to intercept and redirect TCP print 
 
 ```bash
 # Clone repository
-git clone https://github.com/Jordonh18/printer-proxy.git
-cd printer-proxy
+git clone https://github.com/Jordonh18/continuum.git
+cd continuum
 
 # Create virtual environment
 python3 -m venv venv

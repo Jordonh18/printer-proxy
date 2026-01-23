@@ -1,17 +1,17 @@
 #!/bin/bash
 #
-# Update Runner - Triggered by systemd when printer-proxy-update.service starts
+# Update Runner - Triggered by systemd when continuum-update.service starts
 #
 # This script reads the update request file and executes the update via APT.
-# It runs in its own systemd service, completely separate from printer-proxy.
+# It runs in its own systemd service, completely separate from continuum.
 #
 set -euo pipefail
 
-readonly REQUEST_FILE="/var/lib/printer-proxy/update_request.json"
-readonly STATE_FILE="/var/lib/printer-proxy/update_state.json"
-readonly LOG_FILE="/var/log/printer-proxy/update.log"
-readonly HELPER_SCRIPT="/opt/printer-proxy/scripts/update_helper.sh"
-readonly DATA_DIR="/var/lib/printer-proxy"
+readonly REQUEST_FILE="/var/lib/continuum/update_request.json"
+readonly STATE_FILE="/var/lib/continuum/update_state.json"
+readonly LOG_FILE="/var/log/continuum/update.log"
+readonly HELPER_SCRIPT="/opt/continuum/scripts/update_helper.sh"
+readonly DATA_DIR="/var/lib/continuum"
 
 # Ensure required directories exist
 mkdir -p "$DATA_DIR" 2>/dev/null || true

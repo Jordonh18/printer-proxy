@@ -548,7 +548,7 @@ def api_auth_mfa_setup():
     user.set_mfa_secret(secret)
     user.set_mfa_enabled(False)
     user.set_recovery_codes(None)
-    issuer = 'Printer Proxy'
+    issuer = 'Continuum'
     otpauth_uri = pyotp.TOTP(secret).provisioning_uri(name=user.username, issuer_name=issuer)
     return jsonify({
         'otpauth_uri': otpauth_uri,
@@ -729,7 +729,7 @@ def api_info():
     return jsonify({
         'version': __version__,
         'version_string': VERSION_STRING,
-        'app_name': 'Printer Proxy'
+        'app_name': 'Continuum'
     })
 
 
@@ -2316,14 +2316,14 @@ def api_settings_smtp_test():
         }), 400
 
     success = channel.send(
-        subject="Printer Proxy - Test Notification",
-        message="This is a test notification from Printer Proxy. If you received this, your notification settings are working correctly.",
+        subject="Continuum - Test Notification",
+        message="This is a test notification from Continuum. If you received this, your notification settings are working correctly.",
         settings=settings,
         html_message="""
         <html>
         <body style=\"font-family: Arial, sans-serif; padding: 20px;\">
-            <h2 style=\"color: #333;\">Printer Proxy - Test Notification</h2>
-            <p>This is a test notification from <strong>Printer Proxy</strong>.</p>
+            <h2 style=\"color: #333;\">Continuum - Test Notification</h2>
+            <p>This is a test notification from <strong>Continuum</strong>.</p>
             <p>If you received this, your notification settings are working correctly.</p>
         </body>
         </html>
@@ -2366,7 +2366,7 @@ def api_network_overview():
     if not success:
         interfaces = []
     
-    # Get secondary IPs (claimed by Printer Proxy)
+    # Get secondary IPs (claimed by Continuum)
     success, secondary_ips = network.get_secondary_ips()
     claimed_ips = []
     if success:
@@ -2477,7 +2477,7 @@ def api_network_interfaces():
 def api_network_arp_table():
     """
     Get ARP/neighbour table.
-    Optionally filter to show only Printer Proxy owned IPs.
+    Optionally filter to show only Continuum owned IPs.
     """
     network = get_network_manager()
     only_owned = request.args.get('only_owned', 'false').lower() == 'true'
@@ -2849,7 +2849,7 @@ def api_network_diag_reannounce_arp():
     if not success or ip not in claimed_ips:
         return jsonify({
             'success': False,
-            'error': f'IP {ip} is not claimed by Printer Proxy'
+            'error': f'IP {ip} is not claimed by Continuum'
         }), 400
     
     success, message = network.re_announce_arp(ip)

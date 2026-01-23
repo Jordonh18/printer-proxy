@@ -3,7 +3,7 @@ Auto-Update System - Uses APT repository for updates.
 
 Architecture:
 - Background thread periodically runs 'apt update' to check for new versions
-- Updates are performed via 'apt upgrade printer-proxy'
+- Updates are performed via 'apt upgrade continuum'
 - The update process is handled by a separate systemd service
 - This ensures the update process survives when the main service restarts
 """
@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 
 # APT Configuration
 APT_REPO_URL = "https://apt.jordonh.me"
-PACKAGE_NAME = "printer-proxy"
+PACKAGE_NAME = "continuum"
 
 # Paths
-DATA_DIR = Path("/var/lib/printer-proxy")
+DATA_DIR = Path("/var/lib/continuum")
 DEV_DATA_DIR = Path(__file__).parent.parent / "data"
 UPDATE_STATE_FILE = "update_state.json"
-UPDATE_SERVICE = "printer-proxy-update.service"
+UPDATE_SERVICE = "continuum-update.service"
 
 # Check intervals
 CHECK_INTERVAL_SECONDS = 6 * 60 * 60  # 6 hours between checks
@@ -189,7 +189,7 @@ class UpdateManager:
             return False
     
     def _get_apt_available_version(self) -> Optional[str]:
-        """Query APT for the available version of printer-proxy."""
+        """Query APT for the available version of continuum."""
         try:
             result = subprocess.run(
                 ['apt-cache', 'policy', PACKAGE_NAME],
@@ -226,12 +226,12 @@ class UpdateManager:
             if result.returncode != 0:
                 return None
 
-            # Example: Inst printer-proxy [1.0.0-beta.2] (1.0.1 stable [all])
+            # Example: Inst continuum [1.0.0-beta.2] (1.0.1 stable [all])
             match = re.search(rf"Inst\s+{re.escape(PACKAGE_NAME)}\s+\[[^\]]+\]\s+\(([^)\s]+)", result.stdout)
             if match:
                 return match.group(1)
 
-            # Example: Inst printer-proxy (1.0.1 stable [all])
+            # Example: Inst continuum (1.0.1 stable [all])
             match = re.search(rf"Inst\s+{re.escape(PACKAGE_NAME)}\s+\(([^)\s]+)", result.stdout)
             if match:
                 return match.group(1)
@@ -282,7 +282,7 @@ class UpdateManager:
         
         try:
             # Refresh APT cache using helper (non-interactive)
-            helper_path = Path("/opt/printer-proxy/scripts/update_helper.sh")
+            helper_path = Path("/opt/continuum/scripts/update_helper.sh")
             if helper_path.exists():
                 result = subprocess.run(
                     ['sudo', '-n', str(helper_path), 'check'],

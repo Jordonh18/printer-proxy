@@ -1,6 +1,6 @@
 # Workflow Variables & Data Flow System
 
-This document explains how data flows between nodes in the Printer Proxy workflow engine.
+This document explains how data flows between nodes in the Continuum workflow engine.
 
 ## Overview
 

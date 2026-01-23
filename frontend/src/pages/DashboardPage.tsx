@@ -106,7 +106,7 @@ export function DashboardPage() {
           <div className="rounded-2xl border border-border bg-gradient-to-br from-background via-background to-muted/60 p-8 lg:p-12">
             <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-wide text-primary">Printer Proxy</p>
+                <p className="text-sm font-semibold uppercase tracking-wide text-primary">Continuum</p>
                 <h2 className="mt-3 text-3xl font-semibold">Keep printing, even when hardware fails.</h2>
                 <p className="mt-4 text-base text-muted-foreground">
                   Automatically reroute print traffic and maintain uptime without asking users to

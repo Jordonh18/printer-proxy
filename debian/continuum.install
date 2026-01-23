@@ -1,0 +1,14 @@
+# Application files
+app/* opt/continuum/app/
+config/__init__.py opt/continuum/config/
+config/config.py opt/continuum/config/
+scripts/*.sh opt/continuum/scripts/
+requirements.txt opt/continuum/
+wsgi.py opt/continuum/
+run.py opt/continuum/
+
+# React frontend build
+frontend/dist/* opt/continuum/frontend/dist/
+
+# Systemd service files for update functionality
+debian/continuum-update.service opt/continuum/debian/

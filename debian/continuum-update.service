@@ -1,6 +1,6 @@
 [Unit]
-Description=Printer Proxy Update Service
-Documentation=https://github.com/Jordonh18/printer-proxy
+Description=Continuum Update Service
+Documentation=https://github.com/Jordonh18/continuum
 After=network-online.target
 Wants=network-online.target
 
@@ -15,15 +15,15 @@ User=root
 Group=root
 
 # Read update parameters from the request file
-ExecStart=/opt/printer-proxy/scripts/update_runner.sh
+ExecStart=/opt/continuum/scripts/update_runner.sh
 
 # Clean up on success or failure
-ExecStopPost=/bin/rm -f /var/lib/printer-proxy/update_request.json
+ExecStopPost=/bin/rm -f /var/lib/continuum/update_request.json
 
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=printer-proxy-update
+SyslogIdentifier=continuum-update
 
 # Security hardening
 ProtectSystem=false

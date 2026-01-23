@@ -12,7 +12,7 @@ from pathlib import Path
 
 # Determine database path
 BASE_DIR = Path(__file__).parent.parent
-DB_PATH = BASE_DIR / 'data' / 'printer_proxy.db'
+DB_PATH = BASE_DIR / 'data' / 'continuum.db'
 
 def generate_workflow_id():
     """Generate a random workflow ID similar to webhook IDs."""

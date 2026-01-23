@@ -1,4 +1,4 @@
-# Lintian overrides for printer-proxy
+# Lintian overrides for continuum
 #
 # This package uses /opt for installation, which is non-standard but
 # intentional for this self-contained web application that requires
@@ -7,25 +7,25 @@
 
 # We install to /opt which is allowed by FHS 3.0 section 3.13 for
 # "add-on application software packages"
-printer-proxy: dir-or-file-in-opt [opt/printer-proxy/*]
+continuum: dir-or-file-in-opt [opt/continuum/*]
 
 # Python bytecode is regenerated at runtime in the venv
-printer-proxy: package-installs-python-pycache-dir [opt/printer-proxy/app/__pycache__/]
+continuum: package-installs-python-pycache-dir [opt/continuum/app/__pycache__/]
 
 # run.py is imported by gunicorn, not run directly
-printer-proxy: script-not-executable [opt/printer-proxy/run.py]
+continuum: script-not-executable [opt/continuum/run.py]
 
 # External CDN resources - this is a local-network appliance, not a redistributable
 # desktop package. CDN delivery is intentional for offline-capable deployment.
-printer-proxy: privacy-breach-uses-embedded-file *
-printer-proxy: privacy-breach-generic *
+continuum: privacy-breach-uses-embedded-file *
+continuum: privacy-breach-generic *
 
-# We use recursive chown for /var/lib/printer-proxy and /var/log/printer-proxy
+# We use recursive chown for /var/lib/continuum and /var/log/continuum
 # directories which are owned entirely by this package
-printer-proxy: recursive-privilege-change *
+continuum: recursive-privilege-change *
 
 # adduser is in Depends, this is a false positive due to command detection
-printer-proxy: maintainer-script-needs-depends-on-adduser *
+continuum: maintainer-script-needs-depends-on-adduser *
 
 # We handle systemd service ourselves since the service file lives in /opt
-printer-proxy: maintainer-script-calls-systemctl *
+continuum: maintainer-script-calls-systemctl *

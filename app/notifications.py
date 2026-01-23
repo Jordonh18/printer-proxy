@@ -1,5 +1,5 @@
 """
-Notification system for Printer Proxy
+Notification system for Continuum
 
 This module provides a unified interface for sending notifications
 through various channels (SMTP, Teams, etc.). New channels can be
@@ -109,7 +109,7 @@ class SMTPNotificationChannel(NotificationChannel):
             msg['Subject'] = subject
             msg['From'] = from_address
             msg['To'] = ', '.join(recipient_emails)
-            msg['X-Mailer'] = 'Printer-Proxy-Notifier'
+            msg['X-Mailer'] = 'Continuum-Notifier'
             
             # Add plain text part
             msg.attach(MIMEText(message, 'plain'))
@@ -254,14 +254,14 @@ class NotificationManager:
                 
                 try:
                     success = channel.send(
-                        subject="Printer Proxy - Test Notification",
-                        message="This is a test notification from Printer Proxy. If you received this, your notification settings are working correctly.",
+                        subject="Continuum - Test Notification",
+                        message="This is a test notification from Continuum. If you received this, your notification settings are working correctly.",
                         settings=settings,
                         html_message="""
                         <html>
                         <body style="font-family: Arial, sans-serif; padding: 20px;">
-                            <h2 style="color: #333;">Printer Proxy - Test Notification</h2>
-                            <p>This is a test notification from <strong>Printer Proxy</strong>.</p>
+                            <h2 style="color: #333;">Continuum - Test Notification</h2>
+                            <p>This is a test notification from <strong>Continuum</strong>.</p>
                             <p>If you received this, your notification settings are working correctly.</p>
                             <hr style="border: 1px solid #eee;">
                             <p style="color: #888; font-size: 12px;">
@@ -560,9 +560,9 @@ def notify_user_login(username: str, ip_address: str, user_agent: str, user_id: 
         return  # No email configured for this user
     
     # Send notification only to this user's email
-    subject = f"Security Alert: Login to Printer Proxy"
+    subject = f"Security Alert: Login to Continuum"
     message = f"""
-A successful login was detected on your Printer Proxy account.
+A successful login was detected on your Continuum account.
 
 Username: {username}
 IP Address: {ip_address}
@@ -576,7 +576,7 @@ If this was not you, please change your password immediately and contact your ad
     <html>
     <body style="font-family: Arial, sans-serif; padding: 20px;">
         <h2 style="color: #ffc107;">Security Alert: Login Detected</h2>
-        <p>A successful login was detected on your Printer Proxy account.</p>
+        <p>A successful login was detected on your Continuum account.</p>
         <table style="border-collapse: collapse; margin: 20px 0;">
             <tr>
                 <td style="padding: 8px; border: 1px solid #ddd; background: #f8f9fa;"><strong>Username</strong></td>
@@ -874,10 +874,10 @@ def send_weekly_report():
         week_end = datetime.now().strftime('%Y-%m-%d')
 
         scope_label = "All Printers" if printer_ids is None else "Group Scope"
-        subject = f"Printer Proxy Weekly Report ({week_start} to {week_end})"
+        subject = f"Continuum Weekly Report ({week_start} to {week_end})"
 
         message = f"""
-Printer Proxy Weekly Report
+Continuum Weekly Report
 Period: {week_start} to {week_end}
 Scope: {scope_label}
 
@@ -921,7 +921,7 @@ Total Pages: {total_pages:,}
         html_message = f"""
         <html>
         <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2 style="color: #333;">Printer Proxy Weekly Report</h2>
+            <h2 style="color: #333;">Continuum Weekly Report</h2>
             <p style="color: #666;">Period: {week_start} to {week_end}</p>
             <p style="color: #666;">Scope: {scope_label}</p>
             
@@ -974,7 +974,7 @@ Total Pages: {total_pages:,}
             
             <hr style="margin: 30px 0; border: 1px solid #eee;">
             <p style="color: #888; font-size: 12px;">
-                This is an automated weekly report from Printer Proxy.<br>
+                This is an automated weekly report from Continuum.<br>
                 You can disable these reports in your notification preferences.
             </p>
         </body>

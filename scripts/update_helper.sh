@@ -1,20 +1,20 @@
 #!/bin/bash
 #
-# Update Helper Script for Printer Proxy (APT-based)
+# Update Helper Script for Continuum (APT-based)
 # ===================================================
 #
 # SECURITY MODEL:
-# - This script runs as root (via sudo from printer-proxy user)
+# - This script runs as root (via sudo from continuum user)
 # - Updates are performed via APT from the configured repository
 # - Script runs as a SEPARATE PROCESS from the main app
 #
 set -euo pipefail
 
 # Configuration
-readonly LOCK_FILE="/tmp/printer-proxy-update.lock"
-readonly STATE_FILE="/var/lib/printer-proxy/update_state.json"
-readonly LOG_FILE="/var/log/printer-proxy/update.log"
-readonly PACKAGE_NAME="printer-proxy"
+readonly LOCK_FILE="/tmp/continuum-update.lock"
+readonly STATE_FILE="/var/lib/continuum/update_state.json"
+readonly LOG_FILE="/var/log/continuum/update.log"
+readonly PACKAGE_NAME="continuum"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
@@ -114,8 +114,8 @@ do_upgrade() {
     log "INFO" "Current version: $current_version"
     
     # Stop the service first
-    log "INFO" "Stopping printer-proxy service..."
-    systemctl stop printer-proxy.service 2>/dev/null || true
+    log "INFO" "Stopping continuum service..."
+    systemctl stop continuum.service 2>/dev/null || true
     
     # Perform the upgrade
     if DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade "$PACKAGE_NAME" 2>&1 | tee -a "$LOG_FILE"; then
@@ -123,7 +123,7 @@ do_upgrade() {
     else
         log "ERROR" "APT upgrade failed"
         # Try to restart service anyway
-        systemctl start printer-proxy.service 2>/dev/null || true
+        systemctl start continuum.service 2>/dev/null || true
         return 1
     fi
     
@@ -133,13 +133,13 @@ do_upgrade() {
     log "INFO" "New version: $new_version"
     
     # Start the service
-    log "INFO" "Starting printer-proxy service..."
+    log "INFO" "Starting continuum service..."
     systemctl daemon-reload
-    systemctl start printer-proxy.service
+    systemctl start continuum.service
     
     # Verify service is running
     sleep 2
-    if systemctl is-active --quiet printer-proxy.service; then
+    if systemctl is-active --quiet continuum.service; then
         log "INFO" "Service started successfully"
     else
         log "WARN" "Service may not have started correctly"
@@ -152,7 +152,7 @@ do_upgrade() {
 
 # Show current status
 show_status() {
-    echo "=== Printer Proxy Update Status ==="
+    echo "=== Continuum Update Status ==="
     echo ""
     
     local installed_version
@@ -172,7 +172,7 @@ show_status() {
     fi
     
     echo ""
-    if systemctl is-active --quiet printer-proxy.service; then
+    if systemctl is-active --quiet continuum.service; then
         echo "Service status: running"
     else
         echo "Service status: stopped"
@@ -202,7 +202,7 @@ main() {
             echo "Usage: $0 {upgrade|update|status|check}"
             echo ""
             echo "Commands:"
-            echo "  upgrade  - Upgrade printer-proxy to latest version"
+            echo "  upgrade  - Upgrade continuum to latest version"
             echo "  update   - Same as upgrade"
             echo "  status   - Show current version and available updates"
             echo "  check    - Update APT cache and show status"

@@ -75,7 +75,7 @@ __version__ = "$NEW_VERSION"
 __version_info__ = tuple(int(x) for x in __version__.split("."))
 
 # For display
-VERSION_STRING = f"Printer Proxy v{__version__}"
+VERSION_STRING = f"Continuum v{__version__}"
 EOF
 
 echo "✓ Updated $VERSION_FILE"

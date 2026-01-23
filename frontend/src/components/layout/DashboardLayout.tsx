@@ -183,7 +183,7 @@ function AppSidebar({
                   </AnimatePresence>
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">Printer Proxy</span>
+                  <span className="truncate font-semibold">Continuum</span>
                   <span className="truncate text-xs">Fleet Management</span>
                 </div>
               </Link>

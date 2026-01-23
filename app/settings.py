@@ -1,5 +1,5 @@
 """
-Settings management for Printer Proxy
+Settings management for Continuum
 
 Stores application settings in the database with JSON serialization.
 Settings are persisted across updates.
@@ -42,7 +42,7 @@ DEFAULT_SETTINGS = {
     },
     # Future settings categories can be added here
     # 'general': {
-    #     'site_name': 'Printer Proxy',
+    #     'site_name': 'Continuum',
     #     'timezone': 'UTC',
     # },
 }

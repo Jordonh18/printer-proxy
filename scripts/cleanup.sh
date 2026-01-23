@@ -13,7 +13,7 @@ HELPER_SCRIPT="$SCRIPT_DIR/network_helper.sh"
 # Default interface
 INTERFACE="${PROXY_INTERFACE:-eth0}"
 
-echo "=== Printer Proxy Cleanup ==="
+echo "=== Continuum Cleanup ==="
 echo ""
 
 # Get all secondary IPs

@@ -1,5 +1,5 @@
 """
-Database models for Printer Proxy
+Database models for Continuum
 """
 import sqlite3
 from datetime import datetime

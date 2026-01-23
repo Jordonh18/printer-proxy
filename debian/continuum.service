@@ -1,0 +1,29 @@
+[Unit]
+Description=Continuum
+Documentation=https://github.com/jordonh18/continuum
+After=network.target
+
+[Service]
+Type=simple
+User=continuum
+Group=continuum
+WorkingDirectory=/opt/continuum
+Environment="PATH=/opt/continuum/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/opt/continuum/venv/bin/gunicorn \
+    --bind 127.0.0.1:8080 \
+    --workers 2 \
+    --timeout 30 \
+    --access-logfile /var/log/continuum/access.log \
+    --error-logfile /var/log/continuum/error.log \
+    "app:create_app()"
+
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/continuum /var/lib/continuum
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

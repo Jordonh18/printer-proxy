@@ -1,4 +1,4 @@
-# Printer Proxy - Feature Roadmap
+# Continuum - Feature Roadmap
 
 ## 🔥 High Priority
 

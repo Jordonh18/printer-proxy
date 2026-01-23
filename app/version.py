@@ -9,4 +9,4 @@ __version__ = "1.5.0-alpha1"
 __version_info__ = (2, 0, 0)
 
 # For display
-VERSION_STRING = f"Printer Proxy v{__version__}"
+VERSION_STRING = f"Continuum v{__version__}"

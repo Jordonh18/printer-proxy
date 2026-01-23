@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Printer Proxy Network Helper Script
+# Continuum Network Helper Script
 # 
 # This script performs privileged network operations for the printer proxy.
 # It should be called via sudo with a strict allowlist in sudoers.

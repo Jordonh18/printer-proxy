@@ -1,5 +1,5 @@
 """
-WSGI entry point for Printer Proxy
+WSGI entry point for Continuum
 """
 from app import create_app
 

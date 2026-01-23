@@ -135,7 +135,7 @@ export function AuditLogPage() {
 
       {logs && logs.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          Showing last 200 entries. Full logs are stored in /var/log/printer-proxy/.
+          Showing last 200 entries. Full logs are stored in /var/log/continuum/.
         </p>
       )}
     </div>

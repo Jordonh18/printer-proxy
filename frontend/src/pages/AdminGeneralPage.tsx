@@ -77,7 +77,7 @@ export function AdminGeneralPage() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Application</span>
-              <span className="font-medium">{appInfo?.app_name || 'Printer Proxy'}</span>
+              <span className="font-medium">{appInfo?.app_name || 'Continuum'}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Version</span>
