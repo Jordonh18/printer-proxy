@@ -1,5 +1,5 @@
 # Application files
-app/* opt/continuum/app/
+app/ opt/continuum/
 config/__init__.py opt/continuum/config/
 config/config.py opt/continuum/config/
 scripts/*.sh opt/continuum/scripts/
