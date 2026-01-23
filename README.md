@@ -6,8 +6,6 @@
 
 A network traffic redirection solution for network printers that uses NAT and iptables to transparently redirect print jobs from a failed printer to a working replacement without requiring client reconfiguration.
 
-> **Note:** This software is currently in beta. The core network redirection functionality is stable and production-ready. Job monitoring and printer event logs are experimental features.
-
 ## Installation
 
 Install Printer Proxy via the official APT repository:

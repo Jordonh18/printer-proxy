@@ -60,13 +60,29 @@ export function WorkflowsPage() {
   const handleToggleActive = async (workflow: Workflow, checked: boolean) => {
     if (!canEdit) return;
     
+    console.log(`Toggling workflow ${workflow.id} (${workflow.name}) to ${checked ? 'active' : 'inactive'}`);
+    
     try {
       setTogglingId(workflow.id);
-      await workflowApi.update(workflow.id, { is_active: checked });
-      toast.success(checked ? 'Workflow activated' : 'Workflow paused');
+      // Update backend first
+      const updatedWorkflow = await workflowApi.update(workflow.id, { is_active: checked });
+      
+      console.log(`Backend returned is_active: ${updatedWorkflow.is_active}`);
+      
+      // Verify the update succeeded
+      if (updatedWorkflow.is_active !== checked) {
+        throw new Error('Backend did not apply the change');
+      }
+      
+      toast.success(checked ? 'Workflow activated' : 'Workflow deactivated');
+      
+      // Refresh the list to ensure UI matches backend state
       queryClient.invalidateQueries({ queryKey: ['workflows'] });
     } catch (error) {
+      console.error('Failed to toggle workflow:', error);
       toast.error('Failed to update workflow', error instanceof Error ? error.message : undefined);
+      // Refresh to revert the optimistic update
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
     } finally {
       setTogglingId(null);
     }

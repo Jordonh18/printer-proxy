@@ -94,3 +94,7 @@
 - [x] Dashboard with status overview
 - [x] Debian package builds
 - [x] **Auto-Update System** - Check GitHub releases, one-click update from web UI
+
+
+
+auto snapshots and backups of data allowing rollback at any time incase of a configuraton issue or update etc.

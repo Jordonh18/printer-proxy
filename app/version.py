@@ -5,8 +5,8 @@ Update this file to change the version everywhere.
 The build script and templates read from here.
 """
 
-__version__ = "2.0.0"
-__version_info__ = tuple(int(x) for x in __version__.split("."))
+__version__ = "1.5.0-alpha1"
+__version_info__ = (2, 0, 0)
 
 # For display
 VERSION_STRING = f"Printer Proxy v{__version__}"

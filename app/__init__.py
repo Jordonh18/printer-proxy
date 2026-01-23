@@ -12,6 +12,7 @@ from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_compress import Compress
 
 from config.config import (
     SECRET_KEY,
@@ -36,6 +37,7 @@ limiter = Limiter(
     storage_uri="memory://",
     strategy="fixed-window"
 )
+compress = Compress()
 
 
 def create_app() -> Flask:
@@ -74,6 +76,12 @@ def create_app() -> Flask:
     login_manager.init_app(app)
     jwt.init_app(app)
     limiter.init_app(app)
+    
+    # Enable gzip compression for all responses (massive speed improvement)
+    app.config['COMPRESS_MIMETYPES'] = ['text/html', 'text/css', 'text/xml', 'application/json', 'application/javascript']
+    app.config['COMPRESS_LEVEL'] = 6  # Balance between speed and compression
+    app.config['COMPRESS_MIN_SIZE'] = 500  # Only compress responses > 500 bytes
+    compress.init_app(app)
     
     # Enable CORS for API routes (React frontend)
     CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)

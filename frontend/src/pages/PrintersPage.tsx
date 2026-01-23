@@ -279,10 +279,10 @@ export function PrintersPage() {
     return printerStatus.group?.id?.toString() === groupFilter;
   }).filter((printerStatus) => {
     if (statusFilter === 'all') return true;
-    const status = printerStatus.status ?? {};
-    const isOnline = status.is_online ?? (printerStatus as unknown as { is_online?: boolean }).is_online ?? false;
-    const hasRedirect = status.is_redirected ?? (printerStatus as unknown as { has_redirect?: boolean }).has_redirect ?? false;
-    const isTarget = status.is_redirect_target ?? (printerStatus as unknown as { is_target?: boolean }).is_target ?? false;
+    const status = printerStatus.status ?? { is_online: false, is_redirected: false, is_redirect_target: false };
+    const isOnline = status.is_online ?? printerStatus.is_online ?? false;
+    const hasRedirect = status.is_redirected ?? printerStatus.has_redirect ?? false;
+    const isTarget = status.is_redirect_target ?? printerStatus.is_target ?? false;
     if (statusFilter === 'online') return isOnline && !hasRedirect && !isTarget;
     if (statusFilter === 'offline') return !isOnline && !hasRedirect && !isTarget;
     if (statusFilter === 'redirected') return hasRedirect;

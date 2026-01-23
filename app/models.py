@@ -667,6 +667,12 @@ def init_db():
         ON workflow_registry_nodes(category)
     """)
 
+    # Add output_schema column if it doesn't exist (migration)
+    cursor.execute("PRAGMA table_info(workflow_registry_nodes)")
+    registry_columns = {row['name'] for row in cursor.fetchall()}
+    if 'output_schema' not in registry_columns:
+        cursor.execute("ALTER TABLE workflow_registry_nodes ADD COLUMN output_schema TEXT")
+
     # Workflows table (simplified JSON schema)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS workflows (
@@ -720,10 +726,10 @@ def init_db():
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
             'output_schema': [
                 {'key': 'event_type', 'type': 'string', 'description': 'Type of event triggered'},
-                {'key': 'printer_id', 'type': 'string', 'description': 'ID of affected printer'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'ID of affected printer'},
                 {'key': 'printer_name', 'type': 'string', 'description': 'Name of affected printer'},
-                {'key': 'printer_ip', 'type': 'string', 'description': 'IP address of printer'},
-                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp'}
+                {'key': 'printer_ip', 'type': 'ip_address', 'description': 'IP address of printer'},
+                {'key': 'timestamp', 'type': 'timestamp', 'description': 'When the event occurred (ISO format)'}
             ],
             'config_schema': {
                 'fields': [
@@ -789,19 +795,20 @@ def init_db():
             'inputs': [],
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
             'output_schema': [
-                {'key': 'printer_id', 'type': 'string', 'description': 'ID of the printer'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'ID of the printer'},
                 {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
                 {'key': 'queue_count', 'type': 'number', 'description': 'Current queue count'},
                 {'key': 'threshold', 'type': 'number', 'description': 'Threshold value that was exceeded'},
-                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp'}
+                {'key': 'timestamp', 'type': 'timestamp', 'description': 'When threshold was exceeded'}
             ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
-                        'type': 'select',
-                        'helperText': 'Choose the printer to monitor.'
+                        'type': 'printer_id',
+                        'helperText': 'Choose the printer to monitor.',
+                        'icon': 'Printer'
                     },
                     {'key': 'min_jobs', 'label': 'Minimum Jobs', 'type': 'number'}
                 ]
@@ -811,36 +818,42 @@ def init_db():
         {
             'node_key': 'trigger.health_change',
             'name': 'Health Change',
-            'description': 'Start when a printer health state changes.',
+            'description': 'Trigger workflow when a printer goes online or offline.',
             'category': 'trigger',
             'color': '#22c55e',
             'icon': 'Activity',
             'inputs': [],
             'outputs': [{'id': 'out', 'label': 'Run', 'type': 'flow'}],
             'output_schema': [
-                {'key': 'printer_id', 'type': 'string', 'description': 'ID of the printer'},
-                {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
-                {'key': 'printer_ip', 'type': 'string', 'description': 'IP address of the printer'},
-                {'key': 'old_state', 'type': 'string', 'description': 'Previous health state'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'ID of the affected printer'},
+                {'key': 'printer_name', 'type': 'string', 'description': 'Display name of the printer'},
+                {'key': 'printer_ip', 'type': 'ip_address', 'description': 'IP address of the printer'},
+                {'key': 'old_state', 'type': 'string', 'description': 'Previous health state (online/offline)'},
                 {'key': 'new_state', 'type': 'string', 'description': 'New health state (online/offline)'},
-                {'key': 'timestamp', 'type': 'string', 'description': 'ISO timestamp'}
+                {'key': 'timestamp', 'type': 'timestamp', 'description': 'When the state change occurred (ISO format)'}
             ],
             'config_schema': {
                 'fields': [
                     {
                         'key': 'printer_id',
-                        'label': 'Printer',
-                        'type': 'select',
-                        'helperText': 'Choose the printer to evaluate.'
+                        'label': 'Monitor Printer',
+                        'type': 'printer_id',
+                        'helperText': 'Select which printer to monitor for health changes. Leave empty to monitor all printers.',
+                        'placeholder': 'All printers',
+                        'icon': 'Printer'
                     },
                     {
                         'key': 'state',
-                        'label': 'State',
+                        'label': 'Trigger On State',
                         'type': 'select',
                         'options': [
-                            {'label': 'Offline', 'value': 'offline'},
-                            {'label': 'Online', 'value': 'online'}
-                        ]
+                            {'label': 'Goes Offline', 'value': 'offline'},
+                            {'label': 'Comes Online', 'value': 'online'},
+                            {'label': 'Any Change', 'value': 'any'}
+                        ],
+                        'helperText': 'Which state transition should trigger this workflow.',
+                        'required': True,
+                        'icon': 'Activity'
                     }
                 ]
             },
@@ -858,7 +871,7 @@ def init_db():
             'allow_multiple_inputs': True,
             'output_schema': [
                 {'key': 'job_id', 'type': 'string', 'description': 'ID of the print job created'},
-                {'key': 'printer_id', 'type': 'string', 'description': 'ID of the printer used'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'ID of the printer used'},
                 {'key': 'document_path', 'type': 'string', 'description': 'Path to the printed document'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether job was submitted successfully'}
             ],
@@ -867,11 +880,23 @@ def init_db():
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
-                        'type': 'select',
-                        'helperText': 'Choose the printer to print to.',
-                        'supportsDynamic': True
+                        'type': 'printer_id',
+                        'helperText': 'Select the destination printer.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'required': True,
+                        'icon': 'Printer'
                     },
-                    {'key': 'document_path', 'label': 'Document Path', 'type': 'string', 'supportsDynamic': True},
+                    {
+                        'key': 'document_path',
+                        'label': 'Document Path',
+                        'type': 'string',
+                        'placeholder': '/path/to/document.pdf',
+                        'helperText': 'File path to the document to print.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string'],
+                        'icon': 'File'
+                    },
                     {'key': 'copies', 'label': 'Copies', 'type': 'number'}
                 ]
             },
@@ -880,7 +905,7 @@ def init_db():
         {
             'node_key': 'action.redirect',
             'name': 'Activate Redirect',
-            'description': 'Create or update a printer redirect.',
+            'description': 'Route print traffic from one printer to another. Jobs sent to the source printer will be forwarded to the target.',
             'category': 'action',
             'color': '#38bdf8',
             'icon': 'ArrowRightLeft',
@@ -889,12 +914,12 @@ def init_db():
             'allow_multiple_inputs': True,
             'output_schema': [
                 {'key': 'redirect_id', 'type': 'string', 'description': 'ID of the redirect created'},
-                {'key': 'source_printer_id', 'type': 'string', 'description': 'Source printer ID'},
+                {'key': 'source_printer_id', 'type': 'printer_id', 'description': 'Source printer ID'},
                 {'key': 'source_printer_name', 'type': 'string', 'description': 'Source printer name'},
-                {'key': 'source_printer_ip', 'type': 'string', 'description': 'Source printer IP'},
-                {'key': 'target_printer_id', 'type': 'string', 'description': 'Target printer ID'},
+                {'key': 'source_printer_ip', 'type': 'ip_address', 'description': 'Source printer IP address'},
+                {'key': 'target_printer_id', 'type': 'printer_id', 'description': 'Target printer ID'},
                 {'key': 'target_printer_name', 'type': 'string', 'description': 'Target printer name'},
-                {'key': 'target_printer_ip', 'type': 'string', 'description': 'Target printer IP'},
+                {'key': 'target_printer_ip', 'type': 'ip_address', 'description': 'Target printer IP address'},
                 {'key': 'port', 'type': 'number', 'description': 'Port used for redirect'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether redirect was created successfully'}
             ],
@@ -903,18 +928,34 @@ def init_db():
                     {
                         'key': 'source_printer_id',
                         'label': 'Source Printer',
-                        'type': 'select',
-                        'helperText': 'Select the printer receiving jobs.',
-                        'supportsDynamic': True
+                        'type': 'printer_id',
+                        'helperText': 'The offline or failing printer whose traffic should be redirected.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'required': True,
+                        'group': 'redirect',
+                        'icon': 'Printer'
                     },
                     {
                         'key': 'target_printer_id',
                         'label': 'Target Printer',
-                        'type': 'select',
-                        'helperText': 'Select the printer to redirect to.',
-                        'supportsDynamic': True
+                        'type': 'printer_id',
+                        'helperText': 'The working printer that will receive the redirected traffic.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'required': True,
+                        'group': 'redirect',
+                        'icon': 'Printer'
                     },
-                    {'key': 'port', 'label': 'Port', 'type': 'number'}
+                    {
+                        'key': 'port',
+                        'label': 'Port',
+                        'type': 'number',
+                        'placeholder': '9100',
+                        'helperText': 'Network port for print traffic (default: 9100 for RAW printing).',
+                        'group': 'advanced',
+                        'icon': 'Hash'
+                    }
                 ]
             },
             'default_properties': {'source_printer_id': '', 'target_printer_id': '', 'port': 9100}
@@ -930,7 +971,7 @@ def init_db():
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
             'allow_multiple_inputs': True,
             'output_schema': [
-                {'key': 'source_printer_id', 'type': 'string', 'description': 'Printer that was redirected'},
+                {'key': 'source_printer_id', 'type': 'printer_id', 'description': 'Printer that was redirected'},
                 {'key': 'source_printer_name', 'type': 'string', 'description': 'Name of source printer'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether redirect was disabled successfully'}
             ],
@@ -939,9 +980,11 @@ def init_db():
                     {
                         'key': 'source_printer_id',
                         'label': 'Source Printer',
-                        'type': 'select',
+                        'type': 'printer_id',
                         'helperText': 'Select the printer with an active redirect.',
-                        'supportsDynamic': True
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'icon': 'Printer'
                     }
                 ]
             },
@@ -958,7 +1001,7 @@ def init_db():
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
             'allow_multiple_inputs': True,
             'output_schema': [
-                {'key': 'printer_id', 'type': 'string', 'description': 'Printer whose queue was paused'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'Printer whose queue was paused'},
                 {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether queue was paused successfully'}
             ],
@@ -967,9 +1010,11 @@ def init_db():
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
-                        'type': 'select',
+                        'type': 'printer_id',
                         'helperText': 'Choose the queue to pause.',
-                        'supportsDynamic': True
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'icon': 'Printer'
                     }
                 ]
             },
@@ -986,7 +1031,7 @@ def init_db():
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
             'allow_multiple_inputs': True,
             'output_schema': [
-                {'key': 'printer_id', 'type': 'string', 'description': 'Printer whose queue was resumed'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'Printer whose queue was resumed'},
                 {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether queue was resumed successfully'}
             ],
@@ -995,9 +1040,11 @@ def init_db():
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
-                        'type': 'select',
+                        'type': 'printer_id',
                         'helperText': 'Choose the queue to resume.',
-                        'supportsDynamic': True
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'icon': 'Printer'
                     }
                 ]
             },
@@ -1014,7 +1061,7 @@ def init_db():
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
             'allow_multiple_inputs': True,
             'output_schema': [
-                {'key': 'printer_id', 'type': 'string', 'description': 'Printer whose queue was cleared'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'Printer whose queue was cleared'},
                 {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
                 {'key': 'jobs_cleared', 'type': 'number', 'description': 'Number of jobs removed'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether queue was cleared successfully'}
@@ -1024,9 +1071,11 @@ def init_db():
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
-                        'type': 'select',
+                        'type': 'printer_id',
                         'helperText': 'Choose the queue to clear.',
-                        'supportsDynamic': True
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'icon': 'Printer'
                     }
                 ]
             },
@@ -1035,7 +1084,7 @@ def init_db():
         {
             'node_key': 'action.notify.email',
             'name': 'Send Email',
-            'description': 'Send an email notification.',
+            'description': 'Send an email notification to one or more recipients.',
             'category': 'action',
             'color': '#38bdf8',
             'icon': 'Mail',
@@ -1043,23 +1092,56 @@ def init_db():
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
             'allow_multiple_inputs': True,
             'output_schema': [
-                {'key': 'to', 'type': 'string', 'description': 'Email recipient'},
-                {'key': 'subject', 'type': 'string', 'description': 'Email subject'},
+                {'key': 'to', 'type': 'email', 'description': 'Email recipient address'},
+                {'key': 'subject', 'type': 'string', 'description': 'Email subject line'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether email was sent successfully'}
             ],
             'config_schema': {
                 'fields': [
-                    {'key': 'to', 'label': 'To', 'type': 'string', 'supportsDynamic': True},
-                    {'key': 'subject', 'label': 'Subject', 'type': 'string', 'supportsDynamic': True},
-                    {'key': 'body', 'label': 'Body', 'type': 'string', 'supportsDynamic': True}
+                    {
+                        'key': 'to',
+                        'label': 'Recipient Email',
+                        'type': 'email',
+                        'placeholder': 'user@example.com',
+                        'helperText': 'Enter email address(es). Separate multiple with commas.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['email', 'string'],
+                        'required': True,
+                        'group': 'recipient',
+                        'icon': 'AtSign'
+                    },
+                    {
+                        'key': 'subject',
+                        'label': 'Subject Line',
+                        'type': 'string',
+                        'placeholder': 'Printer Alert: {{printer_name}}',
+                        'helperText': 'Email subject. Use {{variable}} to include dynamic data.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string'],
+                        'required': True,
+                        'group': 'content',
+                        'icon': 'Type'
+                    },
+                    {
+                        'key': 'body',
+                        'label': 'Email Body',
+                        'type': 'textarea',
+                        'placeholder': 'Printer {{printer_name}} ({{printer_ip}}) has gone offline.',
+                        'helperText': 'Email content. Supports {{variable}} syntax for dynamic values.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string'],
+                        'required': True,
+                        'group': 'content',
+                        'icon': 'FileText'
+                    }
                 ]
             },
-            'default_properties': {'to': '', 'subject': '', 'body': ''}
+            'default_properties': {'to': '', 'subject': 'Workflow Alert', 'body': ''}
         },
         {
             'node_key': 'action.notify.inapp',
             'name': 'In-App Notification',
-            'description': 'Create an in-app notification for users.',
+            'description': 'Create an in-app notification visible to dashboard users.',
             'category': 'action',
             'color': '#38bdf8',
             'icon': 'Bell',
@@ -1073,9 +1155,38 @@ def init_db():
             ],
             'config_schema': {
                 'fields': [
-                    {'key': 'title', 'label': 'Title', 'type': 'string', 'supportsDynamic': True},
-                    {'key': 'message', 'label': 'Message', 'type': 'string', 'supportsDynamic': True},
-                    {'key': 'link', 'label': 'Link', 'type': 'string', 'supportsDynamic': True}
+                    {
+                        'key': 'title',
+                        'label': 'Notification Title',
+                        'type': 'string',
+                        'placeholder': 'Printer Alert',
+                        'helperText': 'Short title shown in notification banner.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string'],
+                        'required': True,
+                        'icon': 'Type'
+                    },
+                    {
+                        'key': 'message',
+                        'label': 'Message',
+                        'type': 'textarea',
+                        'placeholder': 'Printer {{printer_name}} requires attention.',
+                        'helperText': 'Notification body content. Supports {{variable}} syntax.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string'],
+                        'required': True,
+                        'icon': 'MessageSquare'
+                    },
+                    {
+                        'key': 'link',
+                        'label': 'Action Link',
+                        'type': 'url',
+                        'placeholder': '/printers/{{printer_id}}',
+                        'helperText': 'Optional URL to navigate when notification is clicked.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string', 'url'],
+                        'icon': 'ExternalLink'
+                    }
                 ]
             },
             'default_properties': {'title': '', 'message': '', 'link': ''}
@@ -1083,7 +1194,7 @@ def init_db():
         {
             'node_key': 'action.audit',
             'name': 'Audit Log Entry',
-            'description': 'Record a workflow action to the audit log.',
+            'description': 'Record an action to the audit trail for compliance and tracking.',
             'category': 'action',
             'color': '#38bdf8',
             'icon': 'ClipboardList',
@@ -1097,8 +1208,31 @@ def init_db():
             ],
             'config_schema': {
                 'fields': [
-                    {'key': 'action', 'label': 'Action', 'type': 'string', 'supportsDynamic': True},
-                    {'key': 'details', 'label': 'Details', 'type': 'string', 'supportsDynamic': True}
+                    {
+                        'key': 'action',
+                        'label': 'Action Type',
+                        'type': 'select',
+                        'options': [
+                            {'label': 'Workflow Action', 'value': 'WORKFLOW_ACTION'},
+                            {'label': 'Redirect Created', 'value': 'REDIRECT_CREATED'},
+                            {'label': 'Redirect Removed', 'value': 'REDIRECT_REMOVED'},
+                            {'label': 'Alert Triggered', 'value': 'ALERT_TRIGGERED'},
+                            {'label': 'Custom', 'value': 'CUSTOM'}
+                        ],
+                        'helperText': 'Type of action to record in audit log.',
+                        'required': True,
+                        'icon': 'Tag'
+                    },
+                    {
+                        'key': 'details',
+                        'label': 'Details',
+                        'type': 'textarea',
+                        'placeholder': 'Printer {{printer_name}} redirect activated by workflow.',
+                        'helperText': 'Detailed description of the action. Supports {{variable}} syntax.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string'],
+                        'icon': 'FileText'
+                    }
                 ]
             },
             'default_properties': {'action': 'WORKFLOW_ACTION', 'details': ''}
@@ -1114,7 +1248,7 @@ def init_db():
             'outputs': [{'id': 'out', 'label': 'Next', 'type': 'flow'}],
             'allow_multiple_inputs': True,
             'output_schema': [
-                {'key': 'printer_id', 'type': 'string', 'description': 'Printer that was updated'},
+                {'key': 'printer_id', 'type': 'printer_id', 'description': 'Printer that was updated'},
                 {'key': 'printer_name', 'type': 'string', 'description': 'Name of the printer'},
                 {'key': 'note', 'type': 'string', 'description': 'Note that was added'},
                 {'key': 'success', 'type': 'boolean', 'description': 'Whether note was added successfully'}
@@ -1124,11 +1258,22 @@ def init_db():
                     {
                         'key': 'printer_id',
                         'label': 'Printer',
-                        'type': 'select',
+                        'type': 'printer_id',
                         'helperText': 'Choose the printer to update.',
-                        'supportsDynamic': True
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['printer_id', 'string'],
+                        'icon': 'Printer'
                     },
-                    {'key': 'note', 'label': 'Note', 'type': 'string', 'supportsDynamic': True}
+                    {
+                        'key': 'note',
+                        'label': 'Note',
+                        'type': 'textarea',
+                        'placeholder': 'Add a note about printer {{printer_name}}',
+                        'helperText': 'Note content to append. Supports {{variable}} syntax.',
+                        'supportsDynamic': True,
+                        'acceptsTypes': ['string'],
+                        'icon': 'StickyNote'
+                    }
                 ]
             },
             'default_properties': {'printer_id': '', 'note': ''}
@@ -1430,6 +1575,7 @@ def init_db():
             node['icon'],
             json.dumps(node['inputs']),
             json.dumps(node['outputs']),
+            json.dumps(node.get('output_schema')) if node.get('output_schema') is not None else None,
             json.dumps(node['config_schema']) if node.get('config_schema') is not None else None,
             json.dumps(node['default_properties'])
         )
@@ -1441,8 +1587,8 @@ def init_db():
         cursor.executemany(
             """
             INSERT INTO workflow_registry_nodes
-            (node_key, name, description, category, color, icon, inputs, outputs, config_schema, default_properties)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (node_key, name, description, category, color, icon, inputs, outputs, output_schema, config_schema, default_properties)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             insert_rows
         )
@@ -2087,9 +2233,42 @@ class PrinterRedirectSchedule:
 
 class WorkflowRegistryNode:
     """Model for workflow registry nodes."""
+    
+    _cache: Optional[Dict[str, Any]] = None
+    _cache_time: Optional[float] = None
+    _cache_ttl: int = 300  # 5 minutes
+
+    @staticmethod
+    def _get_cache() -> Optional[List[Dict[str, Any]]]:
+        """Get cached registry nodes if still valid."""
+        import time
+        if WorkflowRegistryNode._cache is None or WorkflowRegistryNode._cache_time is None:
+            return None
+        if time.time() - WorkflowRegistryNode._cache_time > WorkflowRegistryNode._cache_ttl:
+            return None
+        return WorkflowRegistryNode._cache
+    
+    @staticmethod
+    def _set_cache(nodes: List[Dict[str, Any]]):
+        """Cache registry nodes."""
+        import time
+        WorkflowRegistryNode._cache = nodes
+        WorkflowRegistryNode._cache_time = time.time()
+    
+    @staticmethod
+    def _clear_cache():
+        """Clear the cache."""
+        WorkflowRegistryNode._cache = None
+        WorkflowRegistryNode._cache_time = None
 
     @staticmethod
     def get_all(include_disabled: bool = False) -> List[Dict[str, Any]]:
+        # Use cache for enabled nodes only
+        if not include_disabled:
+            cached = WorkflowRegistryNode._get_cache()
+            if cached is not None:
+                return cached
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         if include_disabled:
@@ -2110,12 +2289,18 @@ class WorkflowRegistryNode:
                 'icon': row['icon'],
                 'inputs': json.loads(row['inputs']) if row['inputs'] else [],
                 'outputs': json.loads(row['outputs']) if row['outputs'] else [],
+                'output_schema': json.loads(row['output_schema']) if ('output_schema' in row.keys() and row['output_schema']) else None,
                 'config_schema': json.loads(row['config_schema']) if row['config_schema'] else None,
                 'default_properties': json.loads(row['default_properties']) if row['default_properties'] else {},
                 'enabled': bool(row['enabled']),
                 'created_at': row['created_at'],
                 'updated_at': row['updated_at']
             })
+        
+        # Cache enabled nodes only
+        if not include_disabled:
+            WorkflowRegistryNode._set_cache(nodes)
+        
         return nodes
 
     @staticmethod
@@ -2137,6 +2322,7 @@ class WorkflowRegistryNode:
             'icon': row['icon'],
             'inputs': json.loads(row['inputs']) if row['inputs'] else [],
             'outputs': json.loads(row['outputs']) if row['outputs'] else [],
+            'output_schema': json.loads(row['output_schema']) if ('output_schema' in row.keys() and row['output_schema']) else None,
             'config_schema': json.loads(row['config_schema']) if row['config_schema'] else None,
             'default_properties': json.loads(row['default_properties']) if row['default_properties'] else {},
             'enabled': bool(row['enabled']),
@@ -2151,8 +2337,8 @@ class WorkflowRegistryNode:
         cursor.execute(
             """
             INSERT INTO workflow_registry_nodes
-            (node_key, name, description, category, color, icon, inputs, outputs, config_schema, default_properties, enabled)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (node_key, name, description, category, color, icon, inputs, outputs, output_schema, config_schema, default_properties, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload['key'],
@@ -2163,6 +2349,7 @@ class WorkflowRegistryNode:
                 payload.get('icon', 'Workflow'),
                 json.dumps(payload.get('inputs', [])),
                 json.dumps(payload.get('outputs', [])),
+                json.dumps(payload.get('output_schema')) if payload.get('output_schema') is not None else None,
                 json.dumps(payload.get('config_schema')) if payload.get('config_schema') is not None else None,
                 json.dumps(payload.get('default_properties', {})),
                 int(payload.get('enabled', True))
@@ -2170,6 +2357,7 @@ class WorkflowRegistryNode:
         )
         conn.commit()
         conn.close()
+        WorkflowRegistryNode._clear_cache()
         return WorkflowRegistryNode.get_by_key(payload['key'])
 
     @staticmethod
@@ -2180,7 +2368,7 @@ class WorkflowRegistryNode:
             """
             UPDATE workflow_registry_nodes
             SET name = ?, description = ?, category = ?, color = ?, icon = ?,
-                inputs = ?, outputs = ?, config_schema = ?, default_properties = ?, enabled = ?,
+                inputs = ?, outputs = ?, output_schema = ?, config_schema = ?, default_properties = ?, enabled = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE node_key = ?
             """,
@@ -2192,6 +2380,7 @@ class WorkflowRegistryNode:
                 payload.get('icon', 'Workflow'),
                 json.dumps(payload.get('inputs', [])),
                 json.dumps(payload.get('outputs', [])),
+                json.dumps(payload.get('output_schema')) if payload.get('output_schema') is not None else None,
                 json.dumps(payload.get('config_schema')) if payload.get('config_schema') is not None else None,
                 json.dumps(payload.get('default_properties', {})),
                 int(payload.get('enabled', True)),
@@ -2200,6 +2389,7 @@ class WorkflowRegistryNode:
         )
         conn.commit()
         conn.close()
+        WorkflowRegistryNode._clear_cache()
         return WorkflowRegistryNode.get_by_key(node_key)
 
     @staticmethod
@@ -2210,6 +2400,7 @@ class WorkflowRegistryNode:
         deleted = cursor.rowcount
         conn.commit()
         conn.close()
+        WorkflowRegistryNode._clear_cache()
         return deleted > 0
 
 

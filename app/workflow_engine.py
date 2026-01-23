@@ -760,14 +760,20 @@ def trigger_workflows_for_event(event_type: str, context: Dict[str, Any]) -> Non
         cursor = conn.cursor()
         
         # Get all enabled workflows
-        cursor.execute("SELECT id, nodes FROM workflows WHERE enabled = 1")
+        cursor.execute("SELECT id, nodes, enabled FROM workflows WHERE enabled = 1")
         rows = cursor.fetchall()
         conn.close()
         
         engine = get_workflow_engine()
         
         for row in rows:
-            workflow_id, nodes_json = row
+            workflow_id, nodes_json, enabled = row
+            
+            # Double-check enabled status (safety check)
+            if not enabled:
+                logger.warning(f"Skipping disabled workflow {workflow_id}")
+                continue
+            
             nodes = json.loads(nodes_json) if nodes_json else []
             
             # Check if workflow has matching trigger

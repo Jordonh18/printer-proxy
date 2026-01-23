@@ -87,6 +87,10 @@ def api_auth_required(fn):
             verify_jwt_in_request()
             user_id = get_jwt_identity()
             claims = get_jwt()
+            # Ensure claims is a dict (convert from Row if needed)
+            if not isinstance(claims, dict):
+                current_app.logger.warning(f'JWT claims is {type(claims)}, converting to dict')
+                claims = dict(claims)
             user = User.get_by_id(user_id) if user_id is not None else None
             if user and user.is_active:
                 jti = claims.get('jti')
@@ -110,7 +114,8 @@ def api_auth_required(fn):
             status_code = getattr(exc, 'status_code', 401)
             return jsonify({'error': str(exc)}), status_code
         except Exception as exc:
-            current_app.logger.warning('JWT auth error: %s', str(exc))
+            import traceback
+            current_app.logger.warning('JWT auth error: %s\n%s', str(exc), traceback.format_exc())
             return jsonify({'error': 'Authentication required'}), 401
     return wrapper
 
@@ -351,6 +356,11 @@ def api_workflows_get(workflow_id: str):
 @api_role_required('admin', 'operator')
 def api_workflows_update(workflow_id: str):
     data = request.get_json() or {}
+    
+    # Log if is_active is being changed
+    if 'is_active' in data:
+        current_app.logger.info(f"Workflow {workflow_id} is_active changing to {data['is_active']}")
+    
     workflow = Workflow.update(
         workflow_id,
         name=data.get('name'),
@@ -362,6 +372,14 @@ def api_workflows_update(workflow_id: str):
     )
     if not workflow:
         return jsonify({'error': 'Workflow not found'}), 404
+    
+    # Log audit trail for enable/disable
+    if 'is_active' in data:
+        AuditLog.log(
+            username=g.api_user.username,
+            action='WORKFLOW_UPDATED',
+            details=f"Workflow '{workflow['name']}' {'activated' if data['is_active'] else 'deactivated'}"
+        )
     
     # Update scheduler if workflow has schedule trigger
     try:

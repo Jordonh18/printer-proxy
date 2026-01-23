@@ -526,17 +526,17 @@ export const settingsApi = {
 // Admin API
 export const adminApi = {
   getSmtp: async (): Promise<{ success: boolean; settings: SmtpSettings }> => {
-    const response = await api.get('/admin/smtp');
+    const response = await api.get('/settings/notifications/smtp');
     return response.data;
   },
 
   updateSmtp: async (settings: Partial<SmtpSettings>) => {
-    const response = await api.put('/admin/smtp', settings);
+    const response = await api.post('/settings/notifications/smtp', settings);
     return response.data;
   },
 
   testSmtp: async (settings: Partial<SmtpSettings>) => {
-    const response = await api.post('/admin/smtp/test', settings);
+    const response = await api.post('/settings/notifications/smtp/test', settings);
     return response.data;
   },
 };

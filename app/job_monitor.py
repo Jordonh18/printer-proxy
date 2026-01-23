@@ -63,6 +63,7 @@ class JobMonitor:
         self._printer_states: Dict[str, PrinterState] = {}
         self._lock = threading.Lock()
         self._app = None
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         
     def init_app(self, app):
         """Initialize with Flask app context."""
@@ -89,6 +90,15 @@ class JobMonitor:
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
+        
+        # Clean up event loop
+        if self._event_loop and not self._event_loop.is_closed():
+            try:
+                self._event_loop.close()
+            except Exception:
+                pass
+            self._event_loop = None
+        
         logger.info("Job monitor stopped")
         
     def _run(self):
@@ -234,6 +244,10 @@ class JobMonitor:
                 ObjectType, ObjectIdentity
             )
             
+            # Create event loop once per thread and reuse it
+            if self._event_loop is None or self._event_loop.is_closed():
+                self._event_loop = asyncio.new_event_loop()
+            
             async def query():
                 snmp_engine = SnmpEngine()
                 try:
@@ -243,7 +257,7 @@ class JobMonitor:
                     err, status, idx, vb = await get_cmd(
                         snmp_engine,
                         CommunityData('public'),
-                        await UdpTransportTarget.create((ip, 161), timeout=3, retries=1),
+                        await UdpTransportTarget.create((ip, 161), timeout=2, retries=0),
                         ContextData(),
                         ObjectType(ObjectIdentity(page_count_oid))
                     )
@@ -254,22 +268,16 @@ class JobMonitor:
                 finally:
                     snmp_engine.close_dispatcher()
             
-            # Run in new event loop
-            loop = asyncio.new_event_loop()
+            # Use existing event loop
             try:
-                result = loop.run_until_complete(query())
+                result = self._event_loop.run_until_complete(asyncio.wait_for(query(), timeout=3.0))
                 return result
-            finally:
-                try:
-                    pending = asyncio.all_tasks(loop)
-                    for task in pending:
-                        task.cancel()
-                    if pending:
-                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-                except Exception:
-                    pass
-                loop.close()
+            except asyncio.TimeoutError:
+                logger.debug(f"SNMP timeout for {ip}")
+                return None
+            except Exception as e:
+                logger.debug(f"SNMP error for {ip}: {e}")
+                return None
                 
         except Exception as e:
             logger.debug(f"Error getting page count for {ip}: {e}")

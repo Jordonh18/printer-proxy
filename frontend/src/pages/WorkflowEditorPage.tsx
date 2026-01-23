@@ -60,6 +60,8 @@ export function WorkflowEditorPage() {
   const { data: registry = [] } = useQuery({
     queryKey: ['workflow-registry'],
     queryFn: workflowApi.getRegistry,
+    retry: false,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
   const { data: workflow, isLoading } = useQuery({
@@ -84,9 +86,9 @@ export function WorkflowEditorPage() {
   }, [registry]);
 
   const printerOptions = useMemo(() => {
-    return printers.map((printer: { id: string; name: string }) => ({
-      label: printer.name,
-      value: printer.id,
+    return printers.map((printerStatus: { printer: { id: string; name: string } }) => ({
+      label: printerStatus.printer.name,
+      value: printerStatus.printer.id,
     }));
   }, [printers]);
 
@@ -94,6 +96,7 @@ export function WorkflowEditorPage() {
   const [edges, setEdges] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [connectionNodeId, setConnectionNodeId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [uiState, setUiState] = useState<Record<string, unknown> | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -200,9 +203,9 @@ export function WorkflowEditorPage() {
         target: edge.target,
         sourceHandle: edge.sourceHandle || undefined,
         targetHandle: edge.targetHandle || undefined,
-        type: 'smoothstep',
+        type: 'default',
         style: {
-          strokeWidth: 3,
+          strokeWidth: 2,
           stroke: sourceNode?.data?.color || '#10b981',
         },
         animated: false,
@@ -219,7 +222,7 @@ export function WorkflowEditorPage() {
       suppressDirtyRef.current = false;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workflow?.id, registryMap, canEdit]);
+  }, [workflow?.id, registry, canEdit]);
 
   // Keep deleteNodeByIdRef in sync with deleteNodeById
   useEffect(() => {
@@ -378,6 +381,8 @@ export function WorkflowEditorPage() {
       const sourceType = (sourceNode?.data as WorkflowNodeData & { registryKey?: string })?.registryKey;
       const targetType = (targetNode?.data as WorkflowNodeData & { registryKey?: string })?.registryKey;
 
+      if (!workflowId) return false;
+
       try {
         const validation = await workflowApi.validateConnection(workflowId, {
           source_node_id: connection.source,
@@ -392,18 +397,18 @@ export function WorkflowEditorPage() {
           return;
         }
         pushHistory();
-        const sourceNode = nodes.find((n) => n.id === connection.source);
-        setEdges((current: Edge[]) => 
-          addEdge({
-            ...connection,
-            type: 'smoothstep',
-            style: {
-              strokeWidth: 3,
-              stroke: sourceNode?.data?.color || '#10b981',
-            },
-            animated: false,
-          }, current)
-        );
+        const sourceNode = nodesRef.current.find((n) => n.id === connection.source);
+        const newEdge: Edge = {
+          ...connection,
+          id: `${connection.source}-${connection.target}-${connection.sourceHandle || 'default'}-${connection.targetHandle || 'default'}`,
+          type: 'default',
+          style: {
+            strokeWidth: 2,
+            stroke: sourceNode?.data?.color || '#10b981',
+          },
+          animated: false,
+        };
+        setEdges((current) => addEdge(newEdge, current));
         markDirty();
       } catch (error) {
         toast.error('Connection rejected', error instanceof Error ? error.message : undefined);
@@ -672,15 +677,16 @@ export function WorkflowEditorPage() {
         </div>
 
         {selectedNode && (
-          <div className="absolute left-6 top-[5.5rem] z-10 w-[280px] rounded-lg bg-card shadow-lg" aria-hidden={false}>
+          <div className="absolute left-6 top-[5.5rem] z-50 w-[280px] rounded-lg bg-card shadow-lg nodrag nowheel" aria-hidden={false}>
             <div className="border-b border-border/60 px-4 py-3">
               <CardTitle>Properties</CardTitle>
             </div>
-            <CardContent className="space-y-4 px-4 py-3">
+            <CardContent className="space-y-4 px-4 py-3 max-h-[calc(100vh-12rem)] overflow-y-auto">
               <div className="space-y-4">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Label</label>
                   <Input
+                    className="nodrag"
                     value={selectedNode.data.label}
                     onChange={(event) => updateNodeLabel(event.target.value)}
                     disabled={!canEdit}
@@ -689,17 +695,17 @@ export function WorkflowEditorPage() {
                 {selectedRegistry?.config_schema?.fields?.map((field) => {
                   const currentValue = (selectedNode.data as WorkflowNodeData & { properties?: Record<string, unknown> }).properties?.[field.key];
                   const isReadOnly = field.readOnly || !canEdit;
-                  const usesPrinterSelect = field.key.includes('printer_id');
-                  const selectOptions = usesPrinterSelect ? printerOptions : field.options || [];
+                  const usesPrinterSelect = field.key.endsWith('_printer_id') || field.key === 'printer_id';
+                  const selectOptions = usesPrinterSelect ? printerOptions : (field.options || []);
                   
                   // Boolean fields
                   if (field.type === 'boolean') {
                     return (
-                      <div key={field.key} className="flex items-center justify-between">
+                      <div key={field.key} className="flex items-center justify-between nodrag">
                         <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
                         <input
                           type="checkbox"
-                          className="h-4 w-4"
+                          className="h-4 w-4 nodrag"
                           checked={Boolean(currentValue)}
                           onChange={(event) => updateNodeProperty(field.key, event.target.checked)}
                           disabled={isReadOnly}
@@ -709,10 +715,13 @@ export function WorkflowEditorPage() {
                   }
 
                   // Select/dropdown fields that support dynamic variables (like printer_id)
-                  if ((field.type === 'select' || usesPrinterSelect) && field.supportsDynamic) {
+                  if ((field.type === 'select' || field.type === 'printer_id' || usesPrinterSelect) && field.supportsDynamic) {
                     return (
-                      <div key={field.key}>
-                        <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
+                      <div key={field.key} className="nodrag">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          {field.label}
+                          {field.required && <span className="text-red-500 ml-1">*</span>}
+                        </label>
                         <VariablePicker
                           value={currentValue !== undefined ? String(currentValue) : ''}
                           onChange={(value) => updateNodeProperty(field.key, value)}
@@ -723,6 +732,8 @@ export function WorkflowEditorPage() {
                           placeholder={field.placeholder || (usesPrinterSelect ? 'Select printer or use {{variable}}' : 'Select or use {{variable}}')}
                           disabled={isReadOnly}
                           options={selectOptions}
+                          acceptsTypes={field.acceptsTypes || []}
+                          fieldType={field.type}
                         />
                         {field.helperText && (
                           <p className="mt-1 text-xs text-muted-foreground">{field.helperText}</p>
@@ -737,22 +748,28 @@ export function WorkflowEditorPage() {
                   // Regular select fields (no dynamic support)
                   if (field.type === 'select' || usesPrinterSelect) {
                     return (
-                      <div key={field.key}>
+                      <div key={field.key} className="nodrag">
                         <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
                         <Select
                           value={String(currentValue ?? '')}
                           onValueChange={(value) => updateNodeProperty(field.key, value)}
                           disabled={isReadOnly}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="nodrag w-full">
                             <SelectValue placeholder={field.placeholder || (usesPrinterSelect ? 'Select printer' : 'Select')} />
                           </SelectTrigger>
-                          <SelectContent>
-                            {selectOptions.map((option: { label: string; value: string }, idx: number) => (
-                              <SelectItem key={`${field.key}-${option.value}-${idx}`} value={option.value}>
-                                {option.label}
+                          <SelectContent position="popper" className="z-[100]">
+                            {selectOptions.length === 0 ? (
+                              <SelectItem value="__empty__" disabled>
+                                No options available
                               </SelectItem>
-                            ))}
+                            ) : (
+                              selectOptions.map((option: { label: string; value: string }, idx: number) => (
+                                <SelectItem key={`${field.key}-${option.value}-${idx}`} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))
+                            )}
                           </SelectContent>
                         </Select>
                         {field.helperText && (
@@ -762,11 +779,14 @@ export function WorkflowEditorPage() {
                     );
                   }
 
-                  // Text/string fields that support dynamic values
-                  if (field.supportsDynamic && field.type === 'string') {
+                  // Text/string fields that support dynamic values (including email, textarea, url)
+                  if (field.supportsDynamic && (field.type === 'string' || field.type === 'email' || field.type === 'textarea' || field.type === 'url')) {
                     return (
-                      <div key={field.key}>
-                        <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
+                      <div key={field.key} className="nodrag">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          {field.label}
+                          {field.required && <span className="text-red-500 ml-1">*</span>}
+                        </label>
                         <VariablePicker
                           value={currentValue !== undefined ? String(currentValue) : ''}
                           onChange={(value) => updateNodeProperty(field.key, value)}
@@ -776,6 +796,8 @@ export function WorkflowEditorPage() {
                           registry={registry}
                           placeholder={field.placeholder}
                           disabled={isReadOnly}
+                          acceptsTypes={field.acceptsTypes || []}
+                          fieldType={field.type}
                         />
                         {field.helperText && (
                           <p className="mt-1 text-xs text-muted-foreground">{field.helperText}</p>
@@ -789,9 +811,10 @@ export function WorkflowEditorPage() {
 
                   // Regular text/number input fields
                   return (
-                    <div key={field.key}>
+                    <div key={field.key} className="nodrag">
                       <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
                       <Input
+                        className="nodrag"
                         type={field.type === 'number' ? 'number' : 'text'}
                         value={currentValue !== undefined ? String(currentValue) : ''}
                         onChange={(event) => updateNodeProperty(field.key, field.type === 'number' ? Number(event.target.value) : event.target.value)}
@@ -859,8 +882,16 @@ export function WorkflowEditorPage() {
             nodesFocusable={false}
             edgesFocusable={canEdit}
             elementsSelectable={canEdit}
-            connectionLineType={ConnectionLineType.SmoothStep}
-            connectionLineStyle={{ strokeWidth: 3, stroke: '#10b981' }}
+            connectionLineType={ConnectionLineType.Bezier}
+            connectionLineStyle={{
+              strokeWidth: 2,
+              stroke: connectionNodeId ? nodes.find(n => n.id === connectionNodeId)?.data?.color || '#10b981' : '#10b981',
+            }}
+            defaultEdgeOptions={{
+              type: 'default',
+              animated: false,
+              style: { strokeWidth: 2 },
+            }}
             onMoveEnd={(_: unknown, viewport: Viewport) => {
               setUiState(viewport);
               if (canEdit) {
@@ -877,10 +908,12 @@ export function WorkflowEditorPage() {
                 handleType: params.handleType,
                 active: true,
               };
+              setConnectionNodeId(params.nodeId);
               applyDragState(true);
             }}
             onConnectEnd={() => {
               dragStateRef.current = { nodeId: null, handleId: null, handleType: null, active: false };
+              setConnectionNodeId(null);
               applyDragState(false);
             }}
             proOptions={{ hideAttribution: true }}

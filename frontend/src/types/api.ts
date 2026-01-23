@@ -217,15 +217,34 @@ export interface WorkflowConfigFieldOption {
   value: string;
 }
 
+export interface WorkflowConfigFieldValidation {
+  pattern?: string;
+  patternMessage?: string;
+  min?: number;
+  max?: number;
+  minLength?: number;
+  maxLength?: number;
+}
+
 export interface WorkflowConfigField {
   key: string;
   label: string;
-  type: 'string' | 'number' | 'boolean' | 'select';
+  type: 'string' | 'number' | 'boolean' | 'select' | 'email' | 'textarea' | 'url' | 'printer_id' | 'json';
   placeholder?: string;
   options?: WorkflowConfigFieldOption[];
   readOnly?: boolean;
   helperText?: string;
   supportsDynamic?: boolean;
+  /** Variable types this field can accept (e.g., ['string', 'email']). Empty = accepts all string-like types */
+  acceptsTypes?: string[];
+  required?: boolean;
+  validation?: WorkflowConfigFieldValidation;
+  /** Field group for UI organization */
+  group?: string;
+  /** Icon name for the field */
+  icon?: string;
+  /** Width hint: 'full' | 'half' */
+  width?: 'full' | 'half';
 }
 
 export interface WorkflowOutputSchema {
@@ -245,7 +264,11 @@ export interface WorkflowRegistryNode {
   icon?: string;
   inputs: WorkflowPort[];
   outputs: WorkflowPort[];
-  output_schema?: WorkflowOutputSchema[];
+  output_schema?: Array<{
+    key: string;
+    type: string;
+    description: string;
+  }>;
   config_schema?: {
     fields: WorkflowConfigField[];
   } | null;
