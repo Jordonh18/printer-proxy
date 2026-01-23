@@ -3,7 +3,7 @@ Flask API routes for React frontend
 """
 from functools import wraps
 from uuid import uuid4
-from flask import Blueprint, request, jsonify, g, current_app, Response, stream_with_context
+from flask import Blueprint, request, jsonify, g, current_app, Response, stream_with_context, session
 from datetime import datetime
 from flask_jwt_extended import (
     verify_jwt_in_request, get_jwt_identity, get_jwt,
@@ -2345,6 +2345,600 @@ def api_settings_smtp_test():
         'success': False,
         'error': 'Failed to send test email'
     }), 500
+
+
+# ============================================================================
+# Network Status API Routes
+# ============================================================================
+
+@api_bp.route('/network/overview')
+@api_role_required('admin', 'operator')
+def api_network_overview():
+    """
+    Get complete network overview for the Networking page.
+    Combines interface info, claimed IPs, routing status, and redirect stats.
+    """
+    network = get_network_manager()
+    registry = get_registry()
+    
+    # Get interface information
+    success, interfaces = network.get_interface_info()
+    if not success:
+        interfaces = []
+    
+    # Get secondary IPs (claimed by Printer Proxy)
+    success, secondary_ips = network.get_secondary_ips()
+    claimed_ips = []
+    if success:
+        # Map claimed IPs to their owning redirects
+        redirects = ActiveRedirect.get_all()
+        redirect_map = {r.source_ip: r for r in redirects}
+        
+        for ip in secondary_ips:
+            redirect = redirect_map.get(ip)
+            source_printer = None
+            target_printer = None
+            if redirect:
+                source_printer = registry.get_by_id(redirect.source_printer_id)
+                target_printer = registry.get_by_id(redirect.target_printer_id)
+            
+            claimed_ips.append({
+                'ip': ip,
+                'interface': network.interface,
+                'owner_type': 'redirect' if redirect else 'unknown',
+                'owner_id': redirect.id if redirect else None,
+                'owner_name': f"{source_printer.name if source_printer else 'Unknown'} → {target_printer.name if target_printer else 'Unknown'}" if redirect else None,
+                'status': 'active' if redirect else 'orphaned',
+                'redirect_info': {
+                    'source_printer_id': redirect.source_printer_id if redirect else None,
+                    'source_printer_name': source_printer.name if source_printer else None,
+                    'target_printer_id': redirect.target_printer_id if redirect else None,
+                    'target_printer_name': target_printer.name if target_printer else None,
+                    'port': redirect.port if redirect else None,
+                    'enabled_at': str(redirect.enabled_at) if redirect else None,
+                    'enabled_by': redirect.enabled_by if redirect else None,
+                } if redirect else None
+            })
+    
+    # Get routing information
+    success, routing_info = network.get_routing_info()
+    if not success:
+        routing_info = {
+            'ip_forwarding': False,
+            'nat_enabled': False,
+            'policy_routing': False,
+            'default_gateway': None,
+            'default_interface': None
+        }
+    
+    # Build warnings for misconfiguration
+    warnings = []
+    if not routing_info.get('ip_forwarding'):
+        warnings.append({
+            'type': 'error',
+            'message': 'IP forwarding is disabled',
+            'remediation': 'Run: sudo sysctl -w net.ipv4.ip_forward=1'
+        })
+    
+    # Get active redirects with traffic stats
+    redirects = ActiveRedirect.get_all()
+    traffic_flows = []
+    for redirect in redirects:
+        source_printer = registry.get_by_id(redirect.source_printer_id)
+        target_printer = registry.get_by_id(redirect.target_printer_id)
+        
+        # Get connection stats
+        success, stats = network.get_connection_stats(
+            redirect.source_ip, redirect.target_ip, redirect.port
+        )
+        
+        traffic_flows.append({
+            'redirect_id': redirect.id,
+            'source_ip': redirect.source_ip,
+            'source_port': redirect.port,
+            'target_ip': redirect.target_ip,
+            'target_port': redirect.port,
+            'protocol': redirect.protocol.upper(),
+            'nat_type': 'DNAT',
+            'interface': network.interface,
+            'source_printer_name': source_printer.name if source_printer else 'Unknown',
+            'target_printer_name': target_printer.name if target_printer else 'Unknown',
+            'active_connections': stats.get('active_connections', 0) if success else 0,
+            'bytes_forwarded': stats.get('bytes_forwarded', '0') if success else '0',
+            'enabled_at': str(redirect.enabled_at),
+            'enabled_by': redirect.enabled_by
+        })
+    
+    return jsonify({
+        'interfaces': interfaces,
+        'claimed_ips': claimed_ips,
+        'routing': routing_info,
+        'traffic_flows': traffic_flows,
+        'warnings': warnings,
+        'ports_intercepted': list(SUPPORTED_PROTOCOLS.values()),
+        'default_interface': network.interface
+    })
+
+
+@api_bp.route('/network/interfaces')
+@api_role_required('admin', 'operator')
+def api_network_interfaces():
+    """Get detailed network interface information."""
+    network = get_network_manager()
+    success, interfaces = network.get_interface_info()
+    
+    if success:
+        return jsonify({'success': True, 'interfaces': interfaces})
+    return jsonify({'success': False, 'error': 'Failed to get interface info', 'interfaces': []}), 500
+
+
+@api_bp.route('/network/arp-table')
+@api_role_required('admin', 'operator')
+def api_network_arp_table():
+    """
+    Get ARP/neighbour table.
+    Optionally filter to show only Printer Proxy owned IPs.
+    """
+    network = get_network_manager()
+    only_owned = request.args.get('only_owned', 'false').lower() == 'true'
+    
+    success, arp_entries = network.get_arp_table()
+    if not success:
+        return jsonify({'success': False, 'error': 'Failed to get ARP table', 'entries': []}), 500
+    
+    if only_owned:
+        # Get list of claimed IPs
+        success, claimed_ips = network.get_secondary_ips()
+        claimed_set = set(claimed_ips) if success else set()
+        
+        # Also include IPs from redirects (targets)
+        redirects = ActiveRedirect.get_all()
+        for redirect in redirects:
+            claimed_set.add(redirect.source_ip)
+            claimed_set.add(redirect.target_ip)
+        
+        arp_entries = [entry for entry in arp_entries if entry['ip'] in claimed_set]
+    
+    return jsonify({'success': True, 'entries': arp_entries})
+
+
+@api_bp.route('/network/routing')
+@api_role_required('admin', 'operator')
+def api_network_routing():
+    """Get routing and NAT status information."""
+    network = get_network_manager()
+    success, routing_info = network.get_routing_info()
+    
+    if success:
+        return jsonify({'success': True, 'routing': routing_info})
+    return jsonify({'success': False, 'error': 'Failed to get routing info'}), 500
+
+
+@api_bp.route('/network/nat-rules')
+@api_role_required('admin', 'operator')
+def api_network_nat_rules():
+    """Get current NAT rules (formatted)."""
+    network = get_network_manager()
+    success, output = network.get_nat_rules()
+    
+    return jsonify({
+        'success': success,
+        'rules': output if success else 'Failed to retrieve NAT rules'
+    })
+
+
+@api_bp.route('/network/ports')
+@api_role_required('admin', 'operator')
+def api_network_ports():
+    """Get information about intercepted ports."""
+    # Get active redirects to show which ports are actively intercepting traffic
+    redirects = ActiveRedirect.get_all()
+    
+    # Group by port
+    port_usage = {}
+    for redirect in redirects:
+        port = redirect.port
+        if port not in port_usage:
+            port_usage[port] = {
+                'port': port,
+                'protocol': redirect.protocol.upper(),
+                'redirect_count': 0,
+                'redirects': []
+            }
+        port_usage[port]['redirect_count'] += 1
+        port_usage[port]['redirects'].append({
+            'id': redirect.id,
+            'source_ip': redirect.source_ip,
+            'target_ip': redirect.target_ip
+        })
+    
+    # Add all supported ports with status
+    ports = []
+    for protocol, port in SUPPORTED_PROTOCOLS.items():
+        usage = port_usage.get(port, {})
+        ports.append({
+            'port': port,
+            'protocol': protocol.upper(),
+            'name': protocol,
+            'redirect_count': usage.get('redirect_count', 0),
+            'redirects': usage.get('redirects', []),
+            'status': 'active' if usage.get('redirect_count', 0) > 0 else 'available'
+        })
+    
+    return jsonify({'success': True, 'ports': ports})
+
+
+@api_bp.route('/network/safety')
+@api_role_required('admin', 'operator')
+def api_network_safety():
+    """
+    Get safety guardrail settings and status.
+    Fast endpoint - reads from database only, no sudo commands.
+    """
+    from app.models import get_db_connection, ActiveRedirect
+    
+    # Get claimed IPs count from database instead of running sudo command
+    claimed_count = len(ActiveRedirect.get_all())
+    
+    # Get safety settings from database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    safety_settings = {
+        'ip_conflict_detection': True,
+        'refuse_active_ips': True,
+        'arp_rate_limiting': True,
+    }
+    
+    for key in safety_settings.keys():
+        cursor.execute("SELECT value FROM settings WHERE key = ?", (f"network_safety_{key}",))
+        row = cursor.fetchone()
+        if row:
+            safety_settings[key] = row['value'].lower() == 'true'
+    
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'safety': {
+            **safety_settings,
+            'max_claimed_ips_per_interface': 50,
+            'current_claimed_count': claimed_count,
+            'warnings': []
+        }
+    })
+
+
+@api_bp.route('/network/safety', methods=['POST'])
+@api_role_required('admin')
+def api_network_safety_update():
+    """
+    Update a safety guardrail setting.
+    """
+    from app.models import get_db_connection
+    
+    data = request.get_json() or {}
+    key = data.get('key')
+    enabled = data.get('enabled')
+    
+    allowed_keys = ['ip_conflict_detection', 'refuse_active_ips', 'arp_rate_limiting']
+    
+    if key not in allowed_keys:
+        return jsonify({'success': False, 'error': 'Invalid safety setting key'}), 400
+    
+    if enabled is None:
+        return jsonify({'success': False, 'error': 'Enabled value required'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    db_key = f"network_safety_{key}"
+    value = 'true' if enabled else 'false'
+    
+    # Upsert the setting
+    cursor.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+        (db_key, value, value)
+    )
+    conn.commit()
+    conn.close()
+    
+    # Log the change
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_SAFETY_UPDATE',
+        details=f"Safety setting '{key}' set to {enabled}",
+        success=True
+    )
+    
+    return jsonify({'success': True})
+
+
+@api_bp.route('/network/sudo-status')
+@api_role_required('admin', 'operator')
+def api_network_sudo_status():
+    """
+    Check if sudo is available without password prompt.
+    Used by frontend to determine if sudo password modal is needed.
+    """
+    import subprocess
+    
+    try:
+        # Try a simple sudo command with a very short timeout
+        result = subprocess.run(
+            ['sudo', '-n', 'true'],
+            capture_output=True,
+            timeout=2
+        )
+        sudo_available = result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        sudo_available = False
+    
+    return jsonify({'sudo_available': sudo_available})
+
+
+@api_bp.route('/network/sudo-auth', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_network_sudo_auth():
+    """
+    Authenticate with sudo password for development mode.
+    Stores password in session for subsequent operations.
+    """
+    import subprocess
+    
+    data = request.get_json() or {}
+    password = data.get('password')
+    
+    if not password:
+        return jsonify({'success': False, 'error': 'Password required'}), 400
+    
+    try:
+        # Validate the password by running a simple sudo command
+        # Use echo to provide password via stdin
+        cmd = f"echo '{password}' | sudo -S true 2>&1"
+        process = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            timeout=5,
+            text=True
+        )
+        
+        # Check if sudo succeeded (returncode 0 and no "Sorry" in output)
+        if process.returncode == 0 and 'Sorry' not in process.stderr:
+            # Store in Flask session for this user's subsequent requests
+            session['sudo_password'] = password
+            return jsonify({'success': True})
+        else:
+            error_msg = 'Invalid password'
+            if 'Sorry' in process.stderr:
+                error_msg = 'Incorrect sudo password'
+            return jsonify({'success': False, 'error': error_msg}), 200  # Return 200 with error in JSON
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': 'Authentication timed out'}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 200
+
+
+# ============================================================================
+# Network Diagnostics API Routes
+# ============================================================================
+
+@api_bp.route('/network/diagnostics/ping', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_network_diag_ping():
+    """
+    Ping test diagnostic.
+    Logs action to audit log.
+    """
+    data = request.get_json() or {}
+    ip = data.get('ip')
+    
+    if not ip:
+        return jsonify({'success': False, 'error': 'IP address required'}), 400
+    
+    network = get_network_manager()
+    success, result = network.ping_test(ip)
+    
+    # Log diagnostic action
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_DIAGNOSTIC',
+        details=f"Ping test to {ip}: {result.get('result', 'unknown')}",
+        success=result.get('result') == 'success'
+    )
+    
+    return jsonify({
+        'success': success,
+        'result': result
+    })
+
+
+@api_bp.route('/network/diagnostics/arp-probe', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_network_diag_arp_probe():
+    """
+    ARP probe diagnostic.
+    Logs action to audit log.
+    """
+    data = request.get_json() or {}
+    ip = data.get('ip')
+    
+    if not ip:
+        return jsonify({'success': False, 'error': 'IP address required'}), 400
+    
+    network = get_network_manager()
+    success, result = network.arp_probe(ip)
+    
+    # Log diagnostic action
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_DIAGNOSTIC',
+        details=f"ARP probe for {ip}: {result.get('result', 'unknown')}",
+        success=True
+    )
+    
+    return jsonify({
+        'success': success,
+        'result': result
+    })
+
+
+@api_bp.route('/network/diagnostics/tcp-test', methods=['POST'])
+@api_role_required('admin', 'operator')
+def api_network_diag_tcp_test():
+    """
+    TCP connection test diagnostic.
+    Logs action to audit log.
+    """
+    data = request.get_json() or {}
+    ip = data.get('ip')
+    port = data.get('port', DEFAULT_PORT)
+    
+    if not ip:
+        return jsonify({'success': False, 'error': 'IP address required'}), 400
+    
+    try:
+        port = int(port)
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'Invalid port number'}), 400
+    
+    network = get_network_manager()
+    success, result = network.tcp_test(ip, port)
+    
+    # Log diagnostic action
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_DIAGNOSTIC',
+        details=f"TCP test to {ip}:{port}: {result.get('result', 'unknown')}",
+        success=result.get('result') == 'success'
+    )
+    
+    return jsonify({
+        'success': success,
+        'result': result
+    })
+
+
+@api_bp.route('/network/diagnostics/re-announce-arp', methods=['POST'])
+@api_role_required('admin')
+def api_network_diag_reannounce_arp():
+    """
+    Re-announce ARP for a claimed IP.
+    Admin-only action that requires confirmation.
+    Logs action to audit log.
+    """
+    data = request.get_json() or {}
+    ip = data.get('ip')
+    confirm = data.get('confirm', False)
+    
+    if not ip:
+        return jsonify({'success': False, 'error': 'IP address required'}), 400
+    
+    if not confirm:
+        return jsonify({
+            'success': False, 
+            'error': 'Confirmation required',
+            'requires_confirmation': True,
+            'message': f'This will send gratuitous ARP packets for {ip}. Confirm to proceed.'
+        }), 400
+    
+    # Verify IP is actually claimed by us
+    network = get_network_manager()
+    success, claimed_ips = network.get_secondary_ips()
+    if not success or ip not in claimed_ips:
+        return jsonify({
+            'success': False,
+            'error': f'IP {ip} is not claimed by Printer Proxy'
+        }), 400
+    
+    success, message = network.re_announce_arp(ip)
+    
+    # Log action
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_ARP_REANNOUNCE',
+        source_ip=ip,
+        details=f"ARP re-announcement for {ip}: {message}",
+        success=success
+    )
+    
+    return jsonify({
+        'success': success,
+        'message': message if success else 'Failed to send ARP announcement'
+    })
+
+
+# ============================================================================
+# Network Advanced Diagnostics API Routes  
+# ============================================================================
+
+@api_bp.route('/network/advanced/ip-addr')
+@api_role_required('admin')
+def api_network_advanced_ip_addr():
+    """Get raw ip addr show output. Admin only."""
+    network = get_network_manager()
+    success, output = network.get_ip_addr_raw()
+    
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_ADVANCED_VIEW',
+        details='Viewed raw ip addr output',
+        success=True
+    )
+    
+    return jsonify({'success': success, 'output': output})
+
+
+@api_bp.route('/network/advanced/ip-route')
+@api_role_required('admin')
+def api_network_advanced_ip_route():
+    """Get raw ip route output. Admin only."""
+    network = get_network_manager()
+    success, output = network.get_ip_route_raw()
+    
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_ADVANCED_VIEW',
+        details='Viewed raw ip route output',
+        success=True
+    )
+    
+    return jsonify({'success': success, 'output': output})
+
+
+@api_bp.route('/network/advanced/ip-rule')
+@api_role_required('admin')
+def api_network_advanced_ip_rule():
+    """Get raw ip rule output. Admin only."""
+    network = get_network_manager()
+    success, output = network.get_ip_rule_raw()
+    
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_ADVANCED_VIEW',
+        details='Viewed raw ip rule output',
+        success=True
+    )
+    
+    return jsonify({'success': success, 'output': output})
+
+
+@api_bp.route('/network/advanced/nat-rules')
+@api_role_required('admin')
+def api_network_advanced_nat_rules():
+    """Get raw iptables NAT rules output. Admin only."""
+    network = get_network_manager()
+    success, output = network.get_nat_rules_raw()
+    
+    AuditLog.log(
+        username=g.api_user.username,
+        action='NETWORK_ADVANCED_VIEW',
+        details='Viewed raw iptables NAT rules',
+        success=True
+    )
+    
+    return jsonify({'success': success, 'output': output})
 
 
 # ============================================================================

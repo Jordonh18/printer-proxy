@@ -3,7 +3,8 @@ Network operations handler - interfaces with privileged helper script
 """
 import subprocess
 import shlex
-from typing import Tuple, Optional
+import json
+from typing import Tuple, Optional, List, Dict, Any
 import logging
 
 from config.config import HELPER_SCRIPT, NETWORK_INTERFACE, DEFAULT_PORT
@@ -152,6 +153,149 @@ class NetworkManager:
             return False, "; ".join(errors)
         
         return True, "Redirect disabled successfully"
+    
+    # =========================================================================
+    # Network Information Methods (Read-Only)
+    # =========================================================================
+    
+    def get_interface_info(self, interface: Optional[str] = None) -> Tuple[bool, List[Dict[str, Any]]]:
+        """
+        Get detailed information about network interfaces.
+        Returns JSON array of interface information.
+        """
+        args = ['interface-info']
+        if interface:
+            args.append(interface)
+        
+        success, output = self._run_helper(*args)
+        if success:
+            try:
+                interfaces = json.loads(output)
+                return True, interfaces
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse interface info JSON: {e}")
+                return False, []
+        return False, []
+    
+    def get_arp_table(self) -> Tuple[bool, List[Dict[str, Any]]]:
+        """
+        Get the ARP/neighbour table.
+        Returns JSON array of ARP entries.
+        """
+        success, output = self._run_helper('arp-table')
+        if success:
+            try:
+                arp_entries = json.loads(output)
+                return True, arp_entries
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse ARP table JSON: {e}")
+                return False, []
+        return False, []
+    
+    def get_routing_info(self) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Get routing and forwarding status.
+        Returns JSON object with routing configuration.
+        """
+        success, output = self._run_helper('routing-info')
+        if success:
+            try:
+                routing = json.loads(output)
+                return True, routing
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse routing info JSON: {e}")
+                return False, {}
+        return False, {}
+    
+    def get_connection_stats(self, source_ip: str, target_ip: str, 
+                              port: int = DEFAULT_PORT) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Get connection statistics for a specific redirect.
+        """
+        success, output = self._run_helper('connection-stats', source_ip, target_ip, str(port))
+        if success:
+            try:
+                stats = json.loads(output)
+                return True, stats
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse connection stats JSON: {e}")
+                return False, {}
+        return False, {}
+    
+    # =========================================================================
+    # Diagnostic Methods
+    # =========================================================================
+    
+    def ping_test(self, ip: str) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Perform a ping test to an IP address.
+        Returns result and RTT if successful.
+        """
+        success, output = self._run_helper('ping-test', ip)
+        if success:
+            try:
+                result = json.loads(output)
+                return True, result
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse ping test JSON: {e}")
+                return False, {"ip": ip, "result": "error", "rtt_ms": None}
+        return False, {"ip": ip, "result": "error", "rtt_ms": None}
+    
+    def arp_probe(self, ip: str) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Perform an ARP probe for an IP address.
+        Returns whether there was a response and the MAC if available.
+        """
+        success, output = self._run_helper('arp-probe', ip)
+        if success:
+            try:
+                result = json.loads(output)
+                return True, result
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse ARP probe JSON: {e}")
+                return False, {"ip": ip, "result": "error", "mac": ""}
+        return False, {"ip": ip, "result": "error", "mac": ""}
+    
+    def tcp_test(self, ip: str, port: int) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Test TCP connection to an IP and port.
+        Returns result and latency if successful.
+        """
+        success, output = self._run_helper('tcp-test', ip, str(port))
+        if success:
+            try:
+                result = json.loads(output)
+                return True, result
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse TCP test JSON: {e}")
+                return False, {"ip": ip, "port": port, "result": "error", "latency_ms": None}
+        return False, {"ip": ip, "port": port, "result": "error", "latency_ms": None}
+    
+    def re_announce_arp(self, ip: str) -> Tuple[bool, str]:
+        """
+        Send gratuitous ARP for a claimed IP address.
+        """
+        return self._run_helper('re-announce-arp', self.interface, ip)
+    
+    # =========================================================================
+    # Advanced / Raw Output Methods
+    # =========================================================================
+    
+    def get_nat_rules_raw(self) -> Tuple[bool, str]:
+        """Get raw iptables NAT rules output."""
+        return self._run_helper('nat-rules-raw')
+    
+    def get_ip_addr_raw(self) -> Tuple[bool, str]:
+        """Get raw ip addr show output."""
+        return self._run_helper('ip-addr-raw')
+    
+    def get_ip_route_raw(self) -> Tuple[bool, str]:
+        """Get raw ip route output."""
+        return self._run_helper('ip-route-raw')
+    
+    def get_ip_rule_raw(self) -> Tuple[bool, str]:
+        """Get raw ip rule output."""
+        return self._run_helper('ip-rule-raw')
 
 
 # Global instance

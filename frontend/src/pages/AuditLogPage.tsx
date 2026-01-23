@@ -61,7 +61,7 @@ export function AuditLogPage() {
           <CardContent className="min-h-0 flex-1 p-0">
             <div className="h-full overflow-auto">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-background">
+                <TableHeader className="sticky top-0 z-10">
                   <TableRow>
                     <TableHead className="px-4">Timestamp</TableHead>
                     <TableHead className="px-4">User</TableHead>

@@ -14,9 +14,12 @@ import { WorkflowsPage } from '@/pages/WorkflowsPage';
 import { WorkflowEditorPage } from '@/pages/WorkflowEditorPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
-import { AdminSettingsPage } from '@/pages/AdminSettingsPage';
+import { AdminGeneralPage } from '@/pages/AdminGeneralPage';
+import { AdminNotificationsPage } from '@/pages/AdminNotificationsPage';
+import { AdminIntegrationsPage } from '@/pages/AdminIntegrationsPage';
 import { AuditLogPage } from '@/pages/AuditLogPage';
 import { NotificationsPage } from '@/pages/NotificationsPage';
+import NetworkingPage from '@/pages/NetworkingPage';
 import { Toaster } from '@/components/ui/sonner';
 import { useNotificationStream } from '@/hooks/useNotifications';
 import './index.css';
@@ -61,6 +64,7 @@ function App() {
                 <Route path="/groups" element={<GroupsPage />} />
                 <Route path="/workflows" element={<WorkflowsPage />} />
                 <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
+                <Route path="/networking" element={<NetworkingPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route
                   path="/redirects"
@@ -80,10 +84,26 @@ function App() {
                 />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route
-                  path="/admin/settings"
+                  path="/admin/general"
                   element={
                     <ProtectedRoute requiredRoles={['admin']}>
-                      <AdminSettingsPage />
+                      <AdminGeneralPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/admin/notifications"
+                  element={
+                    <ProtectedRoute requiredRoles={['admin']}>
+                      <AdminNotificationsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/admin/integrations"
+                  element={
+                    <ProtectedRoute requiredRoles={['admin']}>
+                      <AdminIntegrationsPage />
                     </ProtectedRoute>
                   }
                 />

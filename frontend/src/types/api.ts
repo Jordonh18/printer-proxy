@@ -311,3 +311,117 @@ export interface Workflow {
   edges?: WorkflowEdge[];
 }
 
+// ============================================================================
+// Network Types
+// ============================================================================
+
+export interface NetworkInterface {
+  name: string;
+  state: 'up' | 'down' | 'unknown';
+  mac: string;
+  mtu: string;
+  speed: string;
+  primary_ip: string;
+  cidr: string;
+  gateway: string;
+  vlan: string;
+  is_secondary?: boolean;
+}
+
+export interface ClaimedIP {
+  ip: string;
+  interface: string;
+  owner_type: 'redirect' | 'workflow' | 'manual' | 'unknown';
+  owner_id: number | null;
+  owner_name: string | null;
+  status: 'active' | 'pending' | 'error' | 'orphaned';
+  redirect_info?: {
+    source_printer_id: string | null;
+    source_printer_name: string | null;
+    target_printer_id: string | null;
+    target_printer_name: string | null;
+    port: number | null;
+    enabled_at: string | null;
+    enabled_by: string | null;
+  } | null;
+}
+
+export interface RoutingInfo {
+  ip_forwarding: boolean;
+  nat_enabled: boolean;
+  policy_routing: boolean;
+  default_gateway: string | null;
+  default_interface: string | null;
+}
+
+export interface TrafficFlow {
+  redirect_id: number;
+  source_ip: string;
+  source_port: number;
+  target_ip: string;
+  target_port: number;
+  protocol: string;
+  nat_type: string;
+  interface: string;
+  source_printer_name: string;
+  target_printer_name: string;
+  active_connections: number;
+  bytes_forwarded: string;
+  enabled_at: string;
+  enabled_by: string;
+}
+
+export interface NetworkWarning {
+  type: 'error' | 'warning' | 'info';
+  message: string;
+  remediation?: string;
+}
+
+export interface NetworkOverview {
+  interfaces: NetworkInterface[];
+  claimed_ips: ClaimedIP[];
+  routing: RoutingInfo;
+  traffic_flows: TrafficFlow[];
+  warnings: NetworkWarning[];
+  ports_intercepted: number[];
+  default_interface: string;
+}
+
+export interface ArpEntry {
+  ip: string;
+  mac: string;
+  interface: string;
+  state: string;
+}
+
+export interface PortInfo {
+  port: number;
+  protocol: string;
+  name: string;
+  redirect_count: number;
+  redirects: Array<{
+    id: number;
+    source_ip: string;
+    target_ip: string;
+  }>;
+  status: 'active' | 'available';
+}
+
+export interface SafetyInfo {
+  ip_conflict_detection: boolean;
+  refuse_active_ips: boolean;
+  arp_rate_limiting: boolean;
+  max_claimed_ips_per_interface: number;
+  current_claimed_count: number;
+  warnings: string[];
+}
+
+export interface DiagnosticResult {
+  ip: string;
+  port?: number;
+  result: 'success' | 'failed' | 'error' | 'response' | 'no_response' | 'arping_not_available';
+  rtt_ms?: number | null;
+  latency_ms?: number | null;
+  mac?: string;
+}
+

@@ -9,6 +9,13 @@ import type {
   WorkflowRegistryNode,
   WorkflowEdge,
   WorkflowNode,
+  NetworkOverview,
+  NetworkInterface,
+  ArpEntry,
+  RoutingInfo,
+  PortInfo,
+  SafetyInfo,
+  DiagnosticResult,
 } from '@/types/api';
 
 const API_BASE = '/api';
@@ -561,6 +568,166 @@ export const apiTokensApi = {
   getPermissions: async () => {
     const response = await api.get('/auth/me/tokens/permissions');
     return response.data;
+  },
+};
+
+// Network API
+export const networkApi = {
+  /**
+   * Get complete network overview for the Networking page.
+   * Combines interface info, claimed IPs, routing status, and redirect stats.
+   */
+  getOverview: async (): Promise<NetworkOverview> => {
+    const response = await api.get('/network/overview');
+    return response.data;
+  },
+
+  /**
+   * Get detailed network interface information.
+   */
+  getInterfaces: async (): Promise<{ success: boolean; interfaces: NetworkInterface[] }> => {
+    const response = await api.get('/network/interfaces');
+    return response.data;
+  },
+
+  /**
+   * Get ARP/neighbour table.
+   */
+  getArpTable: async (onlyOwned = false): Promise<{ success: boolean; entries: ArpEntry[] }> => {
+    const response = await api.get('/network/arp-table', { params: { only_owned: onlyOwned } });
+    return response.data;
+  },
+
+  /**
+   * Get routing and NAT status information.
+   */
+  getRouting: async (): Promise<{ success: boolean; routing: RoutingInfo }> => {
+    const response = await api.get('/network/routing');
+    return response.data;
+  },
+
+  /**
+   * Get current NAT rules (formatted).
+   */
+  getNatRules: async (): Promise<{ success: boolean; rules: string }> => {
+    const response = await api.get('/network/nat-rules');
+    return response.data;
+  },
+
+  /**
+   * Get information about intercepted ports.
+   */
+  getPorts: async (): Promise<{ success: boolean; ports: PortInfo[] }> => {
+    const response = await api.get('/network/ports');
+    return response.data;
+  },
+
+  /**
+   * Get safety guardrail settings and status.
+   */
+  getSafety: async (): Promise<{ success: boolean; safety: SafetyInfo }> => {
+    const response = await api.get('/network/safety');
+    return response.data;
+  },
+
+  /**
+   * Update a safety guardrail setting.
+   */
+  updateSafetySetting: async (key: string, enabled: boolean): Promise<{ success: boolean }> => {
+    const response = await api.post('/network/safety', { key, enabled });
+    return response.data;
+  },
+
+  /**
+   * Check if sudo is available without password.
+   */
+  checkSudoStatus: async (): Promise<{ sudo_available: boolean }> => {
+    const response = await api.get('/network/sudo-status');
+    return response.data;
+  },
+
+  /**
+   * Authenticate with sudo password for development mode.
+   */
+  authenticateSudo: async (password: string): Promise<{ success: boolean; error?: string }> => {
+    const response = await api.post('/network/sudo-auth', { password });
+    return response.data;
+  },
+
+  // Diagnostics
+  diagnostics: {
+    /**
+     * Ping test diagnostic.
+     */
+    ping: async (ip: string): Promise<{ success: boolean; result: DiagnosticResult }> => {
+      const response = await api.post('/network/diagnostics/ping', { ip });
+      return response.data;
+    },
+
+    /**
+     * ARP probe diagnostic.
+     */
+    arpProbe: async (ip: string): Promise<{ success: boolean; result: DiagnosticResult }> => {
+      const response = await api.post('/network/diagnostics/arp-probe', { ip });
+      return response.data;
+    },
+
+    /**
+     * TCP connection test diagnostic.
+     */
+    tcpTest: async (ip: string, port: number): Promise<{ success: boolean; result: DiagnosticResult }> => {
+      const response = await api.post('/network/diagnostics/tcp-test', { ip, port });
+      return response.data;
+    },
+
+    /**
+     * Re-announce ARP for a claimed IP.
+     * Requires confirmation.
+     */
+    reAnnounceArp: async (ip: string, confirm = false): Promise<{ 
+      success: boolean; 
+      message?: string; 
+      error?: string;
+      requires_confirmation?: boolean;
+    }> => {
+      const response = await api.post('/network/diagnostics/re-announce-arp', { ip, confirm });
+      return response.data;
+    },
+  },
+
+  // Advanced (admin only)
+  advanced: {
+    /**
+     * Get raw ip addr show output.
+     */
+    getIpAddr: async (): Promise<{ success: boolean; output: string }> => {
+      const response = await api.get('/network/advanced/ip-addr');
+      return response.data;
+    },
+
+    /**
+     * Get raw ip route output.
+     */
+    getIpRoute: async (): Promise<{ success: boolean; output: string }> => {
+      const response = await api.get('/network/advanced/ip-route');
+      return response.data;
+    },
+
+    /**
+     * Get raw ip rule output.
+     */
+    getIpRule: async (): Promise<{ success: boolean; output: string }> => {
+      const response = await api.get('/network/advanced/ip-rule');
+      return response.data;
+    },
+
+    /**
+     * Get raw iptables NAT rules output.
+     */
+    getNatRules: async (): Promise<{ success: boolean; output: string }> => {
+      const response = await api.get('/network/advanced/nat-rules');
+      return response.data;
+    },
   },
 };
 

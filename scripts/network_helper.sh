@@ -13,6 +13,18 @@
 #   network_helper.sh list-ips <interface>
 #   network_helper.sh list-nat
 #   network_helper.sh check-ip <ip>
+#   network_helper.sh interface-info [interface]
+#   network_helper.sh arp-table
+#   network_helper.sh routing-info
+#   network_helper.sh connection-stats <source_ip> <target_ip> <port>
+#   network_helper.sh ping-test <ip>
+#   network_helper.sh arp-probe <ip>
+#   network_helper.sh tcp-test <ip> <port>
+#   network_helper.sh re-announce-arp <interface> <ip>
+#   network_helper.sh nat-rules-raw
+#   network_helper.sh ip-addr-raw
+#   network_helper.sh ip-route-raw
+#   network_helper.sh ip-rule-raw
 #
 
 set -euo pipefail
@@ -171,8 +183,9 @@ list_ips() {
     
     validate_interface "$interface"
     
-    # Get all IPs except the primary
-    ip addr show dev "$interface" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1
+    # Get all IPs except the primary (first one)
+    # Skip the first IP address which is the primary
+    ip addr show dev "$interface" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1 | tail -n +2
 }
 
 # List NAT rules
@@ -210,6 +223,319 @@ check_ip() {
             echo "available"
         fi
     fi
+}
+
+# Get detailed interface information (JSON format)
+interface_info() {
+    local interface="${1:-}"
+    
+    # If no interface specified, get all interfaces
+    if [[ -z "$interface" ]]; then
+        # Get list of all non-loopback interfaces
+        interfaces=$(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$' | cut -d'@' -f1)
+    else
+        validate_interface "$interface"
+        interfaces="$interface"
+    fi
+    
+    echo "["
+    first=true
+    for iface in $interfaces; do
+        if [[ "$first" != true ]]; then
+            echo ","
+        fi
+        first=false
+        
+        # Get interface details
+        local state="down"
+        local mac=""
+        local mtu=""
+        local speed=""
+        local primary_ip=""
+        local cidr=""
+        local gateway=""
+        local vlan=""
+        
+        # State (UP/DOWN)
+        if ip link show "$iface" 2>/dev/null | grep -q "state UP"; then
+            state="up"
+        elif ip link show "$iface" 2>/dev/null | grep -q "state DOWN"; then
+            state="down"
+        else
+            state="unknown"
+        fi
+        
+        # MAC address
+        mac=$(ip link show "$iface" 2>/dev/null | awk '/link\/ether/ {print $2}')
+        
+        # MTU
+        mtu=$(ip link show "$iface" 2>/dev/null | awk '/mtu/ {for(i=1;i<=NF;i++) if($i=="mtu") print $(i+1)}')
+        
+        # Link speed (if available via ethtool)
+        if command -v ethtool &>/dev/null; then
+            speed=$(ethtool "$iface" 2>/dev/null | awk '/Speed:/ {print $2}')
+        fi
+        
+        # Primary IP and CIDR
+        ip_info=$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / && !/secondary/ {print $2; exit}')
+        if [[ -n "$ip_info" ]]; then
+            primary_ip="${ip_info%/*}"
+            cidr="${ip_info#*/}"
+        fi
+        
+        # Default gateway (if this interface is used)
+        gateway=$(ip route show default 2>/dev/null | awk -v iface="$iface" '/dev/{if($5==iface) print $3}')
+        
+        # VLAN ID (from interface name like eth0.100)
+        if [[ "$iface" =~ \.[0-9]+$ ]]; then
+            vlan="${iface##*.}"
+        fi
+        
+        cat <<EOF
+  {
+    "name": "$iface",
+    "state": "$state",
+    "mac": "$mac",
+    "mtu": "$mtu",
+    "speed": "${speed:-unknown}",
+    "primary_ip": "$primary_ip",
+    "cidr": "$cidr",
+    "gateway": "$gateway",
+    "vlan": "$vlan"
+  }
+EOF
+    done
+    echo "]"
+}
+
+# Get ARP/neighbour table (JSON format)
+arp_table() {
+    echo "["
+    first=true
+    
+    # Use ip neigh show for ARP table
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        
+        # Parse: 192.168.1.1 dev eth0 lladdr 00:11:22:33:44:55 REACHABLE
+        local ip=$(echo "$line" | awk '{print $1}')
+        local iface=$(echo "$line" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+        local mac=$(echo "$line" | awk '{for(i=1;i<=NF;i++) if($i=="lladdr") print $(i+1)}')
+        local state=$(echo "$line" | awk '{print $NF}')
+        
+        # Skip if no valid data
+        [[ -z "$ip" || -z "$iface" ]] && continue
+        
+        if [[ "$first" != true ]]; then
+            echo ","
+        fi
+        first=false
+        
+        cat <<EOF
+  {
+    "ip": "$ip",
+    "mac": "${mac:-}",
+    "interface": "$iface",
+    "state": "$state"
+  }
+EOF
+    done < <(ip neigh show 2>/dev/null)
+    echo "]"
+}
+
+# Get routing information (JSON format)
+routing_info() {
+    # Check if IP forwarding is enabled
+    local ip_forward=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo "0")
+    
+    # Check if NAT is active (any rules in nat table)
+    local nat_active="false"
+    if iptables -t nat -L PREROUTING -n 2>/dev/null | grep -q "DNAT"; then
+        nat_active="true"
+    fi
+    
+    # Check for policy routing (ip rules other than default)
+    local policy_routing="false"
+    if [[ $(ip rule show 2>/dev/null | wc -l) -gt 3 ]]; then
+        policy_routing="true"
+    fi
+    
+    # Get default route
+    local default_route=$(ip route show default 2>/dev/null | head -1)
+    local default_gw=$(echo "$default_route" | awk '{print $3}')
+    local default_iface=$(echo "$default_route" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+    
+    cat <<EOF
+{
+  "ip_forwarding": $([ "$ip_forward" = "1" ] && echo "true" || echo "false"),
+  "nat_enabled": $nat_active,
+  "policy_routing": $policy_routing,
+  "default_gateway": "$default_gw",
+  "default_interface": "$default_iface"
+}
+EOF
+}
+
+# Get connection statistics for a redirect
+connection_stats() {
+    local source_ip="$1"
+    local target_ip="$2"
+    local port="$3"
+    
+    validate_ip "$source_ip"
+    validate_ip "$target_ip"
+    validate_port "$port"
+    
+    # Count established connections to target
+    local conn_count=0
+    if command -v ss &>/dev/null; then
+        conn_count=$(ss -tn state established dst "$target_ip:$port" 2>/dev/null | wc -l)
+        ((conn_count > 0)) && ((conn_count--))  # Subtract header line
+    fi
+    
+    # Get byte counters from iptables (if available)
+    local bytes=0
+    local bytes_line=$(iptables -t nat -L PREROUTING -n -v 2>/dev/null | grep "$source_ip" | grep "dpt:$port" | head -1)
+    if [[ -n "$bytes_line" ]]; then
+        bytes=$(echo "$bytes_line" | awk '{print $2}')
+    fi
+    
+    cat <<EOF
+{
+  "source_ip": "$source_ip",
+  "target_ip": "$target_ip",
+  "port": $port,
+  "active_connections": $conn_count,
+  "bytes_forwarded": "$bytes"
+}
+EOF
+}
+
+# Ping test for diagnostics
+ping_test() {
+    local ip="$1"
+    
+    validate_ip "$ip"
+    
+    local result
+    local rtt=""
+    
+    if ping -c 3 -W 2 "$ip" &>/dev/null; then
+        result="success"
+        rtt=$(ping -c 3 -W 2 "$ip" 2>/dev/null | tail -1 | awk -F'/' '{print $5}')
+    else
+        result="failed"
+    fi
+    
+    cat <<EOF
+{
+  "ip": "$ip",
+  "result": "$result",
+  "rtt_ms": "${rtt:-null}"
+}
+EOF
+}
+
+# ARP probe for diagnostics
+arp_probe() {
+    local ip="$1"
+    
+    validate_ip "$ip"
+    
+    local result="no_response"
+    local mac=""
+    
+    if command -v arping &>/dev/null; then
+        local output=$(arping -c 2 -w 2 "$ip" 2>/dev/null)
+        if echo "$output" | grep -q "reply from"; then
+            result="response"
+            mac=$(echo "$output" | grep "reply from" | head -1 | awk -F'[\\[\\]]' '{print $2}')
+        fi
+    else
+        result="arping_not_available"
+    fi
+    
+    cat <<EOF
+{
+  "ip": "$ip",
+  "result": "$result",
+  "mac": "$mac"
+}
+EOF
+}
+
+# TCP connection test for diagnostics
+tcp_test() {
+    local ip="$1"
+    local port="$2"
+    
+    validate_ip "$ip"
+    validate_port "$port"
+    
+    local result="failed"
+    local latency=""
+    
+    # Use timeout and bash's /dev/tcp
+    local start_time=$(date +%s%N)
+    if timeout 3 bash -c "echo >/dev/tcp/$ip/$port" 2>/dev/null; then
+        result="success"
+        local end_time=$(date +%s%N)
+        latency=$(( (end_time - start_time) / 1000000 ))  # Convert to ms
+    fi
+    
+    cat <<EOF
+{
+  "ip": "$ip",
+  "port": $port,
+  "result": "$result",
+  "latency_ms": ${latency:-null}
+}
+EOF
+}
+
+# Re-announce ARP for a claimed IP
+re_announce_arp() {
+    local interface="$1"
+    local ip="$2"
+    
+    validate_interface "$interface"
+    validate_ip "$ip"
+    
+    if command -v arping &>/dev/null; then
+        # Send gratuitous ARP
+        arping -c 3 -A -I "$interface" "$ip" &>/dev/null
+        echo "ARP announcement sent for $ip on $interface"
+    else
+        echo "Error: arping not available" >&2
+        exit 1
+    fi
+}
+
+# Raw iptables NAT rules output
+nat_rules_raw() {
+    echo "# iptables -t nat -S"
+    iptables -t nat -S 2>/dev/null || echo "Unable to list NAT rules"
+}
+
+# Raw ip addr output
+ip_addr_raw() {
+    echo "# ip addr show"
+    ip addr show 2>/dev/null || echo "Unable to show addresses"
+}
+
+# Raw ip route output
+ip_route_raw() {
+    echo "# ip route show"
+    ip route show 2>/dev/null || echo "Unable to show routes"
+    echo ""
+    echo "# ip route show table all | head -50"
+    ip route show table all 2>/dev/null | head -50 || echo "Unable to show all routes"
+}
+
+# Raw ip rule output
+ip_rule_raw() {
+    echo "# ip rule show"
+    ip rule show 2>/dev/null || echo "Unable to show rules"
 }
 
 # Main command dispatcher
@@ -259,9 +585,66 @@ case "${1:-}" in
         fi
         check_ip "$2"
         ;;
+    interface-info)
+        # Optional interface argument
+        interface_info "${2:-}"
+        ;;
+    arp-table)
+        arp_table
+        ;;
+    routing-info)
+        routing_info
+        ;;
+    connection-stats)
+        if [[ $# -ne 4 ]]; then
+            echo "Usage: $0 connection-stats <source_ip> <target_ip> <port>" >&2
+            exit 1
+        fi
+        connection_stats "$2" "$3" "$4"
+        ;;
+    ping-test)
+        if [[ $# -ne 2 ]]; then
+            echo "Usage: $0 ping-test <ip>" >&2
+            exit 1
+        fi
+        ping_test "$2"
+        ;;
+    arp-probe)
+        if [[ $# -ne 2 ]]; then
+            echo "Usage: $0 arp-probe <ip>" >&2
+            exit 1
+        fi
+        arp_probe "$2"
+        ;;
+    tcp-test)
+        if [[ $# -ne 3 ]]; then
+            echo "Usage: $0 tcp-test <ip> <port>" >&2
+            exit 1
+        fi
+        tcp_test "$2" "$3"
+        ;;
+    re-announce-arp)
+        if [[ $# -ne 3 ]]; then
+            echo "Usage: $0 re-announce-arp <interface> <ip>" >&2
+            exit 1
+        fi
+        re_announce_arp "$2" "$3"
+        ;;
+    nat-rules-raw)
+        nat_rules_raw
+        ;;
+    ip-addr-raw)
+        ip_addr_raw
+        ;;
+    ip-route-raw)
+        ip_route_raw
+        ;;
+    ip-rule-raw)
+        ip_rule_raw
+        ;;
     *)
         echo "Unknown command: ${1:-}" >&2
-        echo "Available commands: add-ip, remove-ip, add-nat, remove-nat, list-ips, list-nat, check-ip" >&2
+        echo "Available commands: add-ip, remove-ip, add-nat, remove-nat, list-ips, list-nat, check-ip, interface-info, arp-table, routing-info, connection-stats, ping-test, arp-probe, tcp-test, re-announce-arp, nat-rules-raw, ip-addr-raw, ip-route-raw, ip-rule-raw" >&2
         exit 1
         ;;
 esac
