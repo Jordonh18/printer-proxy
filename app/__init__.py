@@ -92,6 +92,11 @@ def create_app() -> Flask:
     # Initialize database
     init_db()
     
+    # Sync integrations to database (ensures catalog is up-to-date)
+    from app.services.integrations import get_integration_registry
+    registry = get_integration_registry()
+    registry.sync_to_database()
+    
     # Initialize health check tables
     from app.services.health_check import init_health_check_tables, start_health_checks
     init_health_check_tables()
@@ -136,6 +141,10 @@ def create_app() -> Flask:
     # Register API blueprint only - React handles all UI
     from app.routes import api_bp
     app.register_blueprint(api_bp, url_prefix='/api')
+    
+    # Register integrations blueprint
+    from app.routes.integrations import integrations_bp
+    app.register_blueprint(integrations_bp)
     
     # Serve React frontend
     setup_react_frontend(app, base_dir)
@@ -200,9 +209,59 @@ def setup_react_frontend(app: Flask, base_dir: Path):
 
 
 def setup_logging(app: Flask):
-    """Configure application logging."""
+    """Configure application logging with JSON structured format for syslog/Splunk."""
+    from pythonjsonlogger import jsonlogger
+    import warnings
+    import asyncio
+    
+    # Suppress pysnmp asyncio task warnings - this is a known issue with pysnmp library
+    # where tasks aren't properly awaited before cleanup. Safe to ignore.
+    warnings.filterwarnings('ignore', message='.*Task was destroyed but it is pending.*')
+    warnings.filterwarnings('ignore', category=ResourceWarning, message='.*unclosed.*')
+    
+    # Set asyncio exception handler to suppress task destruction warnings
+    def asyncio_exception_handler(loop, context):
+        """Custom exception handler to suppress pysnmp task destruction warnings."""
+        message = context.get('message', '')
+        exception = context.get('exception')
+        
+        # Suppress "Task was destroyed but it is pending" messages from pysnmp
+        if 'Task was destroyed but it is pending' in message:
+            return
+        if 'asyncio.asyncio.Task' in message and 'pending' in message:
+            return
+        
+        # Log other asyncio exceptions normally
+        if exception:
+            app.logger.error(f"Asyncio exception: {message}", extra={'exception': str(exception)})
+        else:
+            app.logger.warning(f"Asyncio: {message}")
+    
+    # Apply to default event loop
+    try:
+        loop = asyncio.get_event_loop()
+        loop.set_exception_handler(asyncio_exception_handler)
+    except RuntimeError:
+        pass  # No event loop in current thread
+    
     # Ensure log directory exists
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # JSON formatter for structured logging (syslog/Splunk compatible)
+    json_formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(name)s %(levelname)s %(message)s',
+        rename_fields={'asctime': 'timestamp', 'name': 'logger', 'levelname': 'level'}
+    )
+    
+    # Human-readable formatter for console
+    console_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Choose formatter based on configuration
+    use_json = os.environ.get('LOG_STRUCTURED', 'false').lower() == 'true'
+    file_formatter = json_formatter if use_json else console_formatter
     
     # File handler for application logs
     file_handler = RotatingFileHandler(
@@ -210,25 +269,26 @@ def setup_logging(app: Flask):
         maxBytes=LOG_MAX_SIZE_MB * 1024 * 1024,
         backupCount=LOG_BACKUP_COUNT
     )
-    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.setFormatter(file_formatter)
     file_handler.setLevel(logging.INFO)
     
-    # Console handler for visibility
+    # Console handler for visibility (always human-readable)
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    console_handler.setFormatter(console_formatter)
     console_handler.setLevel(logging.INFO)
     
-    # Audit log handler
+    # Audit log handler (always structured JSON for parsing)
     audit_handler = RotatingFileHandler(
         LOG_DIR / 'audit.log',
         maxBytes=LOG_MAX_SIZE_MB * 1024 * 1024,
         backupCount=LOG_BACKUP_COUNT
     )
-    audit_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    audit_handler.setFormatter(json_formatter)
     audit_handler.setLevel(logging.INFO)
     
     # Add handlers to Flask app logger
     app.logger.addHandler(file_handler)
+    app.logger.addHandler(console_handler)
     app.logger.setLevel(logging.INFO)
     
     # Configure the 'app' logger namespace so all app.* loggers get handlers
@@ -241,6 +301,16 @@ def setup_logging(app: Flask):
     audit_logger = logging.getLogger('audit')
     audit_logger.addHandler(audit_handler)
     audit_logger.setLevel(logging.INFO)
+    
+    # Silence noisy third-party loggers
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('zeroconf').setLevel(logging.WARNING)
+    
+    app.logger.info("Logging configured", extra={
+        'format': 'json' if use_json else 'text',
+        'log_dir': str(LOG_DIR)
+    })
 
 
 def register_error_handlers(app: Flask):
@@ -263,6 +333,22 @@ def register_error_handlers(app: Flask):
     @app.errorhandler(500)
     def internal_error(error):
         app.logger.error(f"Internal server error: {error}")
+        
+        # Send critical system error to integrations
+        try:
+            from app.services.integrations import dispatch_event, EventType
+            dispatch_event(
+                EventType.SYSTEM_ERROR,
+                {
+                    'error': str(error),
+                    'path': request.path if request else 'unknown',
+                    'method': request.method if request else 'unknown',
+                },
+                severity='critical'
+            )
+        except Exception as e:
+            app.logger.error(f"Failed to dispatch system error event: {e}")
+        
         return jsonify({'error': 'Internal server error'}), 500
     
     @app.errorhandler(403)

@@ -13,6 +13,12 @@ pyotp==2.9.0
 requests==2.32.5
 APScheduler==3.11.2
 
+# Encryption for integration credentials
+cryptography==42.0.0
+
+# Logging
+python-json-logger==2.0.7
+
 # Printer Discovery
 zeroconf==0.131.0
 pysnmp>=7.0.0

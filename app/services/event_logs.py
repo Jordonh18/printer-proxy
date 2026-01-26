@@ -736,11 +736,24 @@ def get_logs(ip: str, community: str = 'public') -> List[PrinterEvent]:
                         ))
             except Exception as e:
                 logger.debug(f"HP event log query failed for {ip}: {e}")
+            
+            # Cleanup dispatcher before exiting
+            try:
+                engine.close_dispatcher()
+            except Exception:
+                pass
                 
         except ImportError as e:
             logger.warning(f"pysnmp import error: {e}")
         except Exception as e:
             logger.error(f"Error getting logs for {ip}: {e}")
+        finally:
+            # Cancel and await all pending tasks to prevent "Task was destroyed" warnings
+            pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         
         return logs
     

@@ -326,7 +326,18 @@ class PrinterDiscovery:
                         if result and not isinstance(result, Exception):
                             results[result[0]] = result[1]
                 finally:
-                    dispatcher.transport_dispatcher.close_dispatcher()
+                    # Properly cleanup dispatcher
+                    try:
+                        dispatcher.transport_dispatcher.close_dispatcher()
+                    except Exception:
+                        pass
+                    
+                    # Cancel and await all pending tasks to prevent "Task was destroyed" warnings
+                    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
             
             # Run the async queries
             try:

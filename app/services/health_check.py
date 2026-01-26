@@ -232,6 +232,18 @@ class HealthCheckScheduler:
             self._thread.join(timeout=5)
         logger.info("Health check scheduler stopped")
     
+    def force_check_printer(self, printer_id: str, printer_ip: str):
+        """Force an immediate health check for a specific printer."""
+        try:
+            logger.info(f"Forcing health check for printer {printer_id} ({printer_ip})")
+            result = self.checker.check_printer(printer_id, printer_ip)
+            self.checker.save_result(result)
+            logger.info(f"Health check completed for {printer_id}: online={result.is_online}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to force check printer {printer_id}: {e}")
+            return None
+    
     def _run_loop(self):
         """Main loop for periodic health checks."""
         while self._running:
@@ -283,6 +295,23 @@ class HealthCheckScheduler:
                             except Exception as e:
                                 logger.error(f"Failed to send offline notification: {e}")
                             
+                            # Send to integrations (monitoring/alerting)
+                            from app.services.integrations import dispatch_event, EventType
+                            try:
+                                dispatch_event(
+                                    EventType.PRINTER_OFFLINE,
+                                    {
+                                        'printer_id': printer.id,
+                                        'printer_name': printer.name,
+                                        'printer_ip': printer.ip,
+                                        'printer_model': printer.model,
+                                        'consecutive_failures': result.response_time_ms,
+                                    },
+                                    severity='warning'
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to dispatch integration event: {e}")
+                            
                             # Trigger workflows for printer offline
                             from app.services.workflow_engine import trigger_workflows_for_event
                             try:
@@ -302,6 +331,23 @@ class HealthCheckScheduler:
                                 notify_printer_online(printer.name, printer.ip)
                             except Exception as e:
                                 logger.error(f"Failed to send online notification: {e}")
+                            
+                            # Send to integrations (monitoring/alerting)
+                            from app.services.integrations import dispatch_event, EventType
+                            try:
+                                dispatch_event(
+                                    EventType.PRINTER_ONLINE,
+                                    {
+                                        'printer_id': printer.id,
+                                        'printer_name': printer.name,
+                                        'printer_ip': printer.ip,
+                                        'printer_model': printer.model,
+                                        'response_time_ms': result.response_time_ms,
+                                    },
+                                    severity='info'
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to dispatch integration event: {e}")
                             
                             # Trigger workflows for printer online
                             from app.services.workflow_engine import trigger_workflows_for_event

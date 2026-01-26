@@ -104,6 +104,7 @@ export function useNotificationStream() {
               notification.title,
               {
                 ...(hasMessage ? { description: notification.message } : {}),
+                icon: false,
                 action: notification.link ? {
                   label: 'View',
                   onClick: () => window.location.href = notification.link!,

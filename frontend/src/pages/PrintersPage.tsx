@@ -51,7 +51,6 @@ export function PrintersPage() {
     snmp_available?: boolean;
   }>>([]);
   const [importedIps, setImportedIps] = useState<Set<string>>(new Set());
-  const [importingIp, setImportingIp] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addError, setAddError] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -131,16 +130,20 @@ export function PrintersPage() {
   const addDiscoveredMutation = useMutation({
     mutationFn: printersApi.create,
     onMutate: (variables) => {
-      setImportingIp(variables.ip);
+      // Immediately mark as imported - continue in background
+      setImportedIps((current) => new Set(current).add(variables.ip));
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['printers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      setImportedIps((current) => new Set(current).add(variables.ip));
-      setImportingIp(null);
     },
-    onError: () => {
-      setImportingIp(null);
+    onError: (_error, variables) => {
+      // Remove from imported if failed
+      setImportedIps((current) => {
+        const next = new Set(current);
+        next.delete(variables.ip);
+        return next;
+      });
     },
   });
 
@@ -708,7 +711,6 @@ export function PrintersPage() {
                             {discoverResults.map((printer) => (
                               <TableRow
                                 key={printer.ip}
-                                className={importedIps.has(printer.ip) ? 'bg-emerald-50' : undefined}
                               >
                                 <TableCell className="px-4 text-sm font-mono">{printer.ip}</TableCell>
                                 <TableCell className="px-4">
@@ -783,15 +785,9 @@ export function PrintersPage() {
                                         protocols: printer.tcp_9100_open ? ['raw'] : undefined,
                                       })
                                     }
-                                    disabled={
-                                      addDiscoveredMutation.isPending || importedIps.has(printer.ip)
-                                    }
+                                    disabled={importedIps.has(printer.ip)}
                                   >
-                                    {importedIps.has(printer.ip)
-                                      ? 'Imported'
-                                      : importingIp === printer.ip
-                                        ? 'Importing…'
-                                        : 'Import'}
+                                    {importedIps.has(printer.ip) ? 'Imported' : 'Import'}
                                   </Button>
                                 </TableCell>
                               </TableRow>

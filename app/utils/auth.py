@@ -88,6 +88,22 @@ def authenticate_user(username: str, password: str, client_ip: str = None) -> Tu
             success=False,
             error_message="Invalid credentials"
         )
+        
+        # Send security event to integrations
+        try:
+            from app.services.integrations import dispatch_event
+            dispatch_event(
+                'security.login_failed',
+                {
+                    'username': username,
+                    'reason': 'unknown_username',
+                    'client_ip': client_ip,
+                },
+                severity='warning'
+            )
+        except Exception:
+            pass
+        
         return None, "Invalid username or password"
     
     # Check if account is locked
@@ -128,6 +144,24 @@ def authenticate_user(username: str, password: str, client_ip: str = None) -> Tu
                 success=False,
                 error_message=f"Locked until {lockout_until}"
             )
+            
+            # Send critical security event to integrations
+            try:
+                from app.services.integrations import dispatch_event
+                dispatch_event(
+                    'security.account_locked',
+                    {
+                        'username': username,
+                        'reason': 'too_many_failed_attempts',
+                        'failed_attempts': MAX_LOGIN_ATTEMPTS,
+                        'client_ip': client_ip,
+                        'lockout_until': lockout_until.isoformat(),
+                    },
+                    severity='error'
+                )
+            except Exception:
+                pass
+            
             return None, f"Account locked due to too many failed attempts. Try again in {LOCKOUT_DURATION_MINUTES} minutes."
         
         AuditLog.log(
@@ -137,6 +171,23 @@ def authenticate_user(username: str, password: str, client_ip: str = None) -> Tu
             success=False,
             error_message="Invalid credentials"
         )
+        
+        # Send security event to integrations
+        try:
+            from app.services.integrations import dispatch_event
+            dispatch_event(
+                'security.login_failed',
+                {
+                    'username': username,
+                    'reason': 'invalid_password',
+                    'failed_attempts': updated_user.failed_attempts,
+                    'client_ip': client_ip,
+                },
+                severity='warning'
+            )
+        except Exception:
+            pass
+        
         return None, "Invalid username or password"
     
     # Success!

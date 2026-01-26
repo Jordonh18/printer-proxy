@@ -69,7 +69,6 @@ from app.services.notification_manager import (
 
 # Updater service
 from app.services.updater import (
-    UpdateState,
     UpdateManager,
     get_update_manager,
     init_updater,
@@ -171,7 +170,6 @@ __all__ = [
     'NotificationManager',
     'get_notification_manager',
     # Updater
-    'UpdateState',
     'UpdateManager',
     'get_update_manager',
     'init_updater',

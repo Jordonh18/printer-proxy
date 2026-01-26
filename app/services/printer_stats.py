@@ -3,11 +3,16 @@ Printer Statistics - SNMP-based printer status and statistics
 """
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Cache for printer stats (IP -> (timestamp, PrinterStats))
+_stats_cache: Dict[str, tuple[float, 'PrinterStats']] = {}
+_CACHE_TTL = 300  # 5 minutes
 
 
 @dataclass
@@ -108,8 +113,20 @@ class PrinterStatsCollector:
     def __init__(self, community: str = 'public'):
         self.community = community
     
-    def get_stats(self, ip: str) -> PrinterStats:
-        """Get statistics for a single printer."""
+    def get_stats(self, ip: str, use_cache: bool = True) -> PrinterStats:
+        """Get statistics for a single printer.
+        
+        Args:
+            ip: Printer IP address
+            use_cache: If True, return cached stats if available and fresh
+        """
+        # Check cache first
+        if use_cache and ip in _stats_cache:
+            timestamp, cached_stats = _stats_cache[ip]
+            if time.time() - timestamp < _CACHE_TTL:
+                logger.debug(f"Returning cached stats for {ip}")
+                return cached_stats
+        
         stats = PrinterStats(ip=ip)
         
         try:
@@ -149,7 +166,18 @@ class PrinterStatsCollector:
                         if result and not isinstance(result, Exception):
                             results[result[0]] = result[1]
                 finally:
-                    dispatcher.transport_dispatcher.close_dispatcher()
+                    # Properly cleanup dispatcher
+                    try:
+                        dispatcher.transport_dispatcher.close_dispatcher()
+                    except Exception:
+                        pass
+                    
+                    # Cancel and await all pending tasks to prevent "Task was destroyed" warnings
+                    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
             
             # Run queries
             try:
@@ -168,6 +196,9 @@ class PrinterStatsCollector:
             logger.warning("pysnmp not installed")
         except Exception as e:
             logger.error(f"Error getting stats for {ip}: {e}")
+        
+        # Cache the result
+        _stats_cache[ip] = (time.time(), stats)
         
         return stats
     
@@ -280,7 +311,18 @@ class PrinterStatsCollector:
                         if result and not isinstance(result, Exception):
                             results[result[0]] = result[1]
                 finally:
-                    dispatcher.transport_dispatcher.close_dispatcher()
+                    # Properly cleanup dispatcher
+                    try:
+                        dispatcher.transport_dispatcher.close_dispatcher()
+                    except Exception:
+                        pass
+                    
+                    # Cancel and await all pending tasks to prevent "Task was destroyed" warnings
+                    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
             
             try:
                 loop = asyncio.get_event_loop()
@@ -338,9 +380,14 @@ def get_collector() -> PrinterStatsCollector:
     return _collector
 
 
-def get_stats(ip: str) -> PrinterStats:
-    """Get statistics for a printer by IP."""
-    return get_collector().get_stats(ip)
+def get_stats(ip: str, use_cache: bool = True) -> PrinterStats:
+    """Get statistics for a printer by IP.
+    
+    Args:
+        ip: Printer IP address
+        use_cache: If True, return cached stats if available and fresh (default: True)
+    """
+    return get_collector().get_stats(ip, use_cache=use_cache)
 
 
 def get_toner_levels(ip: str) -> Dict[str, int]:

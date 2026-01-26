@@ -763,4 +763,124 @@ export const networkApi = {
   },
 };
 
+// ============================================================================
+// Integrations API
+// ============================================================================
+
+import type {
+  IntegrationMetadata,
+  IntegrationConnection,
+  IntegrationConnectionHealth,
+  IntegrationEventType,
+  IntegrationEventRouting,
+  IntegrationConnectionHistoryEntry,
+} from '@/types/api';
+
+export const integrationsApi = {
+  // Catalog
+  getCatalog: async (params?: { category?: string; search?: string }): Promise<{
+    integrations: IntegrationMetadata[];
+    categories: Record<string, number>;
+  }> => {
+    const response = await api.get('/integrations/catalog', { params });
+    return response.data;
+  },
+
+  getIntegration: async (integrationId: string): Promise<IntegrationMetadata> => {
+    const response = await api.get(`/integrations/catalog/${integrationId}`);
+    return response.data;
+  },
+
+  // Connections
+  listConnections: async (params?: { 
+    integration_id?: string; 
+    include_disabled?: boolean;
+  }): Promise<{ connections: IntegrationConnection[] }> => {
+    const response = await api.get('/integrations/connections', { params });
+    return response.data;
+  },
+
+  getConnection: async (connectionId: string): Promise<IntegrationConnection> => {
+    const response = await api.get(`/integrations/connections/${connectionId}`);
+    return response.data;
+  },
+
+  createConnection: async (data: {
+    integration_id: string;
+    name: string;
+    description?: string;
+    config: Record<string, unknown>;
+    credentials: Record<string, string>;
+  }): Promise<{ connection_id: string; message: string }> => {
+    const response = await api.post('/integrations/connections', data);
+    return response.data;
+  },
+
+  updateConnection: async (connectionId: string, data: {
+    name?: string;
+    description?: string;
+    config?: Record<string, unknown>;
+    credentials?: Record<string, string>;
+    enabled?: boolean;
+  }): Promise<{ message: string }> => {
+    const response = await api.put(`/integrations/connections/${connectionId}`, data);
+    return response.data;
+  },
+
+  deleteConnection: async (connectionId: string): Promise<{ message: string }> => {
+    const response = await api.delete(`/integrations/connections/${connectionId}`);
+    return response.data;
+  },
+
+  // Connection Actions
+  testConnection: async (connectionId: string): Promise<{
+    success: boolean;
+    health: IntegrationConnectionHealth;
+  }> => {
+    const response = await api.post(`/integrations/connections/${connectionId}/test`);
+    return response.data;
+  },
+
+  connectIntegration: async (connectionId: string): Promise<{ message: string }> => {
+    const response = await api.post(`/integrations/connections/${connectionId}/connect`);
+    return response.data;
+  },
+
+  disconnectIntegration: async (connectionId: string): Promise<{ message: string }> => {
+    const response = await api.post(`/integrations/connections/${connectionId}/disconnect`);
+    return response.data;
+  },
+
+  // Event Routing
+  getEventRouting: async (connectionId: string): Promise<{ routings: IntegrationEventRouting[] }> => {
+    const response = await api.get(`/integrations/connections/${connectionId}/routing`);
+    return response.data;
+  },
+
+  setEventRouting: async (connectionId: string, data: {
+    event_type: string;
+    enabled?: boolean;
+    filters?: Record<string, unknown>;
+    transform?: Record<string, unknown>;
+    priority?: number;
+  }): Promise<{ message: string }> => {
+    const response = await api.post(`/integrations/connections/${connectionId}/routing`, data);
+    return response.data;
+  },
+
+  // Event Types
+  listEventTypes: async (): Promise<{ event_types: IntegrationEventType[] }> => {
+    const response = await api.get('/integrations/events');
+    return response.data;
+  },
+
+  // Connection History
+  getConnectionHistory: async (connectionId: string, params?: { limit?: number }): Promise<{
+    history: IntegrationConnectionHistoryEntry[];
+  }> => {
+    const response = await api.get(`/integrations/connections/${connectionId}/history`, { params });
+    return response.data;
+  },
+};
+
 export default api;

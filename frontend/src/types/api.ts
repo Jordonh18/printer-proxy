@@ -425,3 +425,114 @@ export interface DiagnosticResult {
   mac?: string;
 }
 
+// ============================================================================
+// Integration Types
+// ============================================================================
+
+export interface IntegrationConfigFieldOption {
+  value: string;
+  label: string;
+}
+
+export interface IntegrationConfigFieldValidation {
+  min?: number;
+  max?: number;
+  pattern?: string;
+}
+
+export interface IntegrationConfigField {
+  name: string;
+  label: string;
+  type: 'text' | 'password' | 'url' | 'number' | 'select' | 'multiselect' | 'boolean' | 'json';
+  required: boolean;
+  default?: unknown;
+  description?: string;
+  placeholder?: string;
+  sensitive?: boolean;
+  options?: IntegrationConfigFieldOption[];
+  validation?: IntegrationConfigFieldValidation;
+  depends_on?: Record<string, unknown>;
+}
+
+export interface IntegrationMetadata {
+  id: string;
+  name: string;
+  description: string;
+  category: 'logging' | 'monitoring' | 'alerting' | 'ticketing' | 'communication' | 'security' | 'automation';
+  auth_type: 'none' | 'api_key' | 'oauth2' | 'basic' | 'token' | 'webhook_secret' | 'certificate';
+  capabilities: string[];
+  icon: string;
+  color: string;
+  version: string;
+  vendor: string;
+  docs_url?: string;
+  support_url?: string;
+  config_schema?: IntegrationConfigField[];
+  required_scopes?: string[];
+  optional_scopes?: string[];
+  webhook_config?: {
+    supported: boolean;
+    signature_header?: string;
+    signature_algorithm?: string;
+  };
+  beta?: boolean;
+  deprecated?: boolean;
+}
+
+export interface IntegrationConnection {
+  id: string;
+  integration_id: string;
+  name: string;
+  description?: string;
+  user_id: number;
+  config: Record<string, unknown>;
+  credentials?: Record<string, string>;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error' | 'rate_limited' | 'authenticating' | 'pending_oauth';
+  last_connected_at?: string | null;
+  last_error?: string | null;
+  error_count: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  integration?: {
+    id: string;
+    name: string;
+    category: string;
+    icon: string;
+    color: string;
+  };
+}
+
+export interface IntegrationConnectionHealth {
+  status: string;
+  last_check?: string;
+  last_success?: string;
+  last_error?: string;
+  response_time_ms?: number;
+  details?: Record<string, unknown>;
+}
+
+export interface IntegrationEventType {
+  type: string;
+  description: string;
+  category: string;
+}
+
+export interface IntegrationEventRouting {
+  event_type: string;
+  enabled: boolean;
+  filters: Record<string, unknown>;
+  transform?: Record<string, unknown>;
+  priority: number;
+}
+
+export interface IntegrationConnectionHistoryEntry {
+  id: number;
+  action: string;
+  details?: Record<string, unknown>;
+  status?: string;
+  error_message?: string;
+  created_at: string;
+}
+
+

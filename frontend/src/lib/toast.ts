@@ -6,19 +6,19 @@ import { toast as sonnerToast } from 'sonner';
  */
 export const toast = {
   success: (title: string, description?: string) => {
-    sonnerToast.success(title, description ? { description } : undefined);
+    sonnerToast.success(title, { description, icon: false });
   },
 
   error: (title: string, description?: string) => {
-    sonnerToast.error(title, description ? { description } : undefined);
+    sonnerToast.error(title, { description, icon: false });
   },
 
   warning: (title: string, description?: string) => {
-    sonnerToast.warning(title, description ? { description } : undefined);
+    sonnerToast.warning(title, { description, icon: false });
   },
 
   info: (title: string, description?: string) => {
-    sonnerToast.info(title, description ? { description } : undefined);
+    sonnerToast.info(title, { description, icon: false });
   },
 
   promise: <T,>(

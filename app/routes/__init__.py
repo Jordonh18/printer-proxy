@@ -11,6 +11,7 @@ from flask_jwt_extended import (
 )
 from flask_jwt_extended.exceptions import JWTExtendedException
 
+import logging
 import sqlite3
 from app.models import AuditLog, ActiveRedirect, GroupRedirectSchedule, PrinterRedirectSchedule, PrinterGroup, User, UserSession, WorkflowRegistryNode, Workflow, get_db_connection
 from app.utils.auth import authenticate_user, validate_password_strength, hash_password, verify_password
@@ -36,6 +37,8 @@ from config.config import (
     PASSWORD_REQUIRE_SPECIAL,
     SUPPORTED_PROTOCOLS
 )
+
+logger = logging.getLogger(__name__)
 
 
 # API Blueprint only - React handles all UI
@@ -810,6 +813,12 @@ def api_printer_create():
         if not success:
             return jsonify({'error': 'Failed to create printer'}), 500
         
+        # Trigger immediate health check for newly created printer
+        from app.services.health_check import get_scheduler
+        scheduler = get_scheduler()
+        if scheduler and scheduler.is_running():
+            scheduler.force_check_printer(printer.id, printer.ip)
+        
         AuditLog.log(
             username=g.api_user.username,
             action='PRINTER_CREATED',
@@ -818,6 +827,26 @@ def api_printer_create():
             details=f"Created printer '{name}' ({ip})",
             success=True
         )
+        
+        # Send event to integrations
+        try:
+            from app.services.integrations import dispatch_event, EventType
+            dispatch_event(
+                EventType.PRINTER_ADDED,
+                {
+                    'printer_id': printer.id,
+                    'printer_name': printer.name,
+                    'printer_ip': printer.ip,
+                    'printer_model': printer.model,
+                    'printer_location': printer.location,
+                    'printer_department': printer.department,
+                    'protocols': printer.protocols,
+                    'created_by': g.api_user.username,
+                },
+                severity='info'
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch printer added event: {e}")
         
         return jsonify({
             'id': printer.id,
@@ -940,6 +969,24 @@ def api_printer_delete(printer_id):
             success=True
         )
         
+        # Send event to integrations
+        try:
+            from app.services.integrations import dispatch_event, EventType
+            dispatch_event(
+                EventType.PRINTER_REMOVED,
+                {
+                    'printer_id': printer.id,
+                    'printer_name': printer.name,
+                    'printer_ip': printer.ip,
+                    'printer_model': printer.model,
+                    'printer_location': printer.location,
+                    'deleted_by': g.api_user.username,
+                },
+                severity='info'
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch printer removed event: {e}")
+        
         return jsonify({'message': f"Printer '{printer.name}' deleted"})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1022,6 +1069,23 @@ def api_printer_group_create():
             details=f"Created printer group '{name}'",
             success=True
         )
+        
+        # Send event to integrations
+        try:
+            from app.services.integrations import dispatch_event, EventType
+            dispatch_event(
+                EventType.GROUP_CREATED,
+                {
+                    'group_id': group['id'],
+                    'group_name': name,
+                    'description': description,
+                    'created_by': g.api_user.username,
+                },
+                severity='info'
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch group created event: {e}")
+        
         return jsonify(group), 201
     except sqlite3.IntegrityError:
         return jsonify({'error': 'Group name already exists'}), 400
@@ -1062,6 +1126,23 @@ def api_printer_group_update(group_id: int):
             details=f"Updated printer group '{name}'",
             success=True
         )
+        
+        # Send event to integrations
+        try:
+            from app.services.integrations import dispatch_event, EventType
+            dispatch_event(
+                EventType.GROUP_UPDATED,
+                {
+                    'group_id': group_id,
+                    'group_name': name,
+                    'description': description,
+                    'updated_by': g.api_user.username,
+                },
+                severity='info'
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch group updated event: {e}")
+        
         return jsonify(group)
     except sqlite3.IntegrityError:
         return jsonify({'error': 'Group name already exists'}), 400
@@ -1093,6 +1174,22 @@ def api_printer_group_delete(group_id: int):
         details=f"Deleted printer group ID {group_id}",
         success=True
     )
+    
+    # Send event to integrations
+    try:
+        from app.services.integrations import dispatch_event, EventType
+        dispatch_event(
+            EventType.GROUP_DELETED,
+            {
+                'group_id': group_id,
+                'group_name': existing.get('name', 'Unknown'),
+                'deleted_by': g.api_user.username,
+            },
+            severity='info'
+        )
+    except Exception as e:
+        logger.error(f"Failed to dispatch group deleted event: {e}")
+    
     return jsonify({'message': 'Group deleted'})
 
 
@@ -1577,6 +1674,28 @@ def api_redirect_create():
             success=True
         )
         
+        # Send event to integrations
+        try:
+            from app.services.integrations import dispatch_event, EventType
+            dispatch_event(
+                EventType.REDIRECT_CREATED,
+                {
+                    'redirect_id': redirect_obj.id,
+                    'source_printer_id': source_printer_id,
+                    'source_printer_name': source_printer.name,
+                    'source_printer_ip': source_printer.ip,
+                    'target_printer_id': target_printer_id,
+                    'target_printer_name': target_printer.name,
+                    'target_printer_ip': target_printer.ip,
+                    'protocol': 'raw',
+                    'port': DEFAULT_PORT,
+                    'created_by': g.api_user.username,
+                },
+                severity='info'
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch redirect created event: {e}")
+        
         return jsonify({
             'id': redirect_obj.id,
             'source_printer_id': redirect_obj.source_printer_id,
@@ -1604,6 +1723,11 @@ def api_redirect_delete(redirect_id):
     )
     
     if success:
+        # Get printer details before deletion for event
+        registry = get_registry()
+        source_printer = registry.get_by_id(redirect_obj.source_printer_id)
+        target_printer = registry.get_by_id(redirect_obj.target_printer_id)
+        
         ActiveRedirect.delete(redirect_obj.id)
         
         AuditLog.log(
@@ -1616,6 +1740,26 @@ def api_redirect_delete(redirect_id):
             details="Redirect removed",
             success=True
         )
+        
+        # Send event to integrations
+        try:
+            from app.services.integrations import dispatch_event, EventType
+            dispatch_event(
+                EventType.REDIRECT_REMOVED,
+                {
+                    'redirect_id': redirect_obj.id,
+                    'source_printer_id': redirect_obj.source_printer_id,
+                    'source_printer_name': source_printer.name if source_printer else 'Unknown',
+                    'source_printer_ip': redirect_obj.source_ip,
+                    'target_printer_id': redirect_obj.target_printer_id,
+                    'target_printer_name': target_printer.name if target_printer else 'Unknown',
+                    'target_printer_ip': redirect_obj.target_ip,
+                    'removed_by': g.api_user.username,
+                },
+                severity='info'
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch redirect removed event: {e}")
         
         return jsonify({'message': 'Redirect removed'})
     else:
@@ -2124,18 +2268,39 @@ def api_dashboard_analytics():
             return 0.0
         return (days * 24) + hours + (minutes / 60.0)
 
-    # Top printers by SNMP total pages + uptime
+    # Top printers by cached SNMP stats (fetched concurrently if needed)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+    
     snmp_pages = []
-    for printer in printers:
-        stats = get_stats(printer.ip)
-        total_pages = stats.total_pages if stats and stats.total_pages is not None else 0
-        uptime_hours = _parse_uptime_hours(stats.uptime) if stats and stats.uptime else 0.0
-        snmp_pages.append({
-            'printer_id': printer.id,
-            'name': printer.name,
-            'total_pages': total_pages,
-            'uptime_hours': round(uptime_hours, 1)
-        })
+    
+    def fetch_printer_stats(printer):
+        """Fetch stats for a single printer (runs in thread pool)."""
+        try:
+            stats = get_stats(printer.ip)
+            total_pages = stats.total_pages if stats and stats.total_pages is not None else 0
+            uptime_hours = _parse_uptime_hours(stats.uptime) if stats and stats.uptime else 0.0
+            return {
+                'printer_id': printer.id,
+                'name': printer.name,
+                'total_pages': total_pages,
+                'uptime_hours': round(uptime_hours, 1)
+            }
+        except Exception as e:
+            logger.debug(f"Error fetching stats for {printer.name}: {e}")
+            return {
+                'printer_id': printer.id,
+                'name': printer.name,
+                'total_pages': 0,
+                'uptime_hours': 0.0
+            }
+    
+    # Fetch printer stats in parallel (max 10 concurrent threads to avoid overwhelming network)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_printer_stats, printer): printer for printer in printers}
+        for future in as_completed(futures):
+            snmp_pages.append(future.result())
+    
     top_pages = sorted(snmp_pages, key=lambda x: x['total_pages'], reverse=True)[:15]
 
     # Daily job volume (last 7 days)
@@ -2184,7 +2349,7 @@ def api_dashboard_analytics():
 @api_bp.route('/update/status')
 def api_update_status():
     """Get current update status."""
-    from app.updater import get_update_manager
+    from app.services import get_update_manager
     manager = get_update_manager()
     return jsonify(manager.get_state())
 
@@ -2193,7 +2358,7 @@ def api_update_status():
 @api_role_required('admin')
 def api_update_check():
     """Force an update check."""
-    from app.updater import get_update_manager
+    from app.services import get_update_manager
     manager = get_update_manager()
     update_available, error = manager.check_for_updates(force=True)
     
@@ -2215,7 +2380,7 @@ def api_update_check():
 @api_role_required('admin')
 def api_update_start():
     """Start the update process."""
-    from app.updater import get_update_manager
+    from app.services import get_update_manager
     
     manager = get_update_manager()
     success, message = manager.start_update()

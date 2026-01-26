@@ -223,6 +223,26 @@ class JobMonitor:
                 )
                 if job:
                     logger.info(f"Recorded job: {pages_printed} pages on printer {printer_id}")
+                    
+                    # Send event to integrations
+                    try:
+                        from app.services.integrations import dispatch_event, EventType
+                        
+                        event_type = EventType.JOB_COMPLETED if job_status == 'completed' else EventType.JOB_FAILED
+                        severity = 'info' if job_status == 'completed' else 'warning'
+                        
+                        dispatch_event(
+                            event_type,
+                            {
+                                'printer_id': printer_id,
+                                'job_id': job.get('id'),
+                                'pages': pages_printed,
+                                'status': job_status,
+                            },
+                            severity=severity
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to dispatch job event: {e}")
             except Exception as e:
                 logger.error(f"Failed to record job: {e}")
         
@@ -247,6 +267,7 @@ class JobMonitor:
             # Create event loop once per thread and reuse it
             if self._event_loop is None or self._event_loop.is_closed():
                 self._event_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._event_loop)
             
             async def query():
                 snmp_engine = SnmpEngine()
@@ -268,9 +289,21 @@ class JobMonitor:
                 finally:
                     snmp_engine.close_dispatcher()
             
+            async def run_with_cleanup():
+                """Run query and cancel any pending tasks afterward."""
+                try:
+                    return await asyncio.wait_for(query(), timeout=3.0)
+                finally:
+                    # Cancel and await all pending tasks to prevent "Task was destroyed" warnings
+                    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+            
             # Use existing event loop
             try:
-                result = self._event_loop.run_until_complete(asyncio.wait_for(query(), timeout=3.0))
+                result = self._event_loop.run_until_complete(run_with_cleanup())
                 return result
             except asyncio.TimeoutError:
                 logger.debug(f"SNMP timeout for {ip}")

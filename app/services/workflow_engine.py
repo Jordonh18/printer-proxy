@@ -42,17 +42,81 @@ class WorkflowEngine:
             
             logger.info(f"Executing workflow: {workflow['name']}")
             
+            # Send workflow started event to integrations
+            try:
+                from app.services.integrations import dispatch_event
+                dispatch_event(
+                    'workflow.started',
+                    {
+                        'workflow_id': workflow_id,
+                        'workflow_name': workflow['name'],
+                        'trigger_context': context,
+                    },
+                    severity='info'
+                )
+            except Exception as e:
+                logger.error(f"Failed to dispatch workflow started event: {e}")
+            
             # Find trigger node
             trigger_node = self._find_trigger_node(workflow)
             if not trigger_node:
                 logger.error(f"No trigger node found in workflow {workflow_id}")
+                
+                # Send failure event
+                try:
+                    from app.services.integrations import dispatch_event
+                    dispatch_event(
+                        'workflow.failed',
+                        {
+                            'workflow_id': workflow_id,
+                            'workflow_name': workflow['name'],
+                            'error': 'No trigger node found',
+                        },
+                        severity='error'
+                    )
+                except Exception:
+                    pass
+                
                 return False
             
             # Start execution from trigger
-            return self._execute_node(workflow, trigger_node['id'], context)
+            result = self._execute_node(workflow, trigger_node['id'], context)
+            
+            # Send completion/failure event
+            try:
+                from app.services.integrations import dispatch_event
+                event_type = 'workflow.completed' if result else 'workflow.failed'
+                dispatch_event(
+                    event_type,
+                    {
+                        'workflow_id': workflow_id,
+                        'workflow_name': workflow['name'],
+                        'success': result,
+                    },
+                    severity='info' if result else 'warning'
+                )
+            except Exception as e:
+                logger.error(f"Failed to dispatch workflow completion event: {e}")
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error executing workflow {workflow_id}: {e}", exc_info=True)
+            
+            # Send error event
+            try:
+                from app.services.integrations import dispatch_event
+                dispatch_event(
+                    'workflow.failed',
+                    {
+                        'workflow_id': workflow_id,
+                        'error': str(e),
+                    },
+                    severity='error'
+                )
+            except Exception:
+                pass
+            
             return False
     
     def verify_webhook_signature(self, payload: str, signature: str, secret: str) -> bool:

@@ -119,6 +119,24 @@ class NetworkManager:
         # Step 1: Add secondary IP
         success, output = self.add_secondary_ip(source_ip)
         if not success:
+            # Send failure event to integrations
+            try:
+                from app.services.integrations import dispatch_event, EventType
+                dispatch_event(
+                    EventType.REDIRECT_FAILED,
+                    {
+                        'source_ip': source_ip,
+                        'target_ip': target_ip,
+                        'port': port,
+                        'operation': 'enable',
+                        'step': 'add_secondary_ip',
+                        'error': output,
+                    },
+                    severity='error'
+                )
+            except Exception as e:
+                logger.error(f"Failed to dispatch redirect failed event: {e}")
+            
             return False, f"Failed to add IP: {output}"
         
         # Step 2: Add NAT rule
@@ -126,6 +144,25 @@ class NetworkManager:
         if not success:
             # Rollback: remove the IP we just added
             self.remove_secondary_ip(source_ip)
+            
+            # Send failure event to integrations
+            try:
+                from app.services.integrations import dispatch_event, EventType
+                dispatch_event(
+                    EventType.REDIRECT_FAILED,
+                    {
+                        'source_ip': source_ip,
+                        'target_ip': target_ip,
+                        'port': port,
+                        'operation': 'enable',
+                        'step': 'add_nat_rule',
+                        'error': output,
+                    },
+                    severity='error'
+                )
+            except Exception as e:
+                logger.error(f"Failed to dispatch redirect failed event: {e}")
+            
             return False, f"Failed to add NAT rule: {output}"
         
         return True, "Redirect enabled successfully"

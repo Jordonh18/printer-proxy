@@ -157,9 +157,22 @@ TCP_CHECK_TIMEOUT_SECONDS = 3
 # Logging Configuration
 # =============================================================================
 
+# Use structured JSON logging in production, human-readable in development
+LOG_STRUCTURED = os.environ.get('LOG_STRUCTURED', 'false').lower() == 'true'
+
+# Log format for human-readable logs
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+# Log file rotation settings
 LOG_MAX_SIZE_MB = 10
 LOG_BACKUP_COUNT = 5
+
+# Log levels by module (can be overridden via environment)
+LOG_LEVEL_DEFAULT = os.environ.get('LOG_LEVEL', 'INFO').upper()
+LOG_LEVEL_NETWORK = os.environ.get('LOG_LEVEL_NETWORK', 'INFO').upper()
+LOG_LEVEL_DISCOVERY = os.environ.get('LOG_LEVEL_DISCOVERY', 'INFO').upper()
+LOG_LEVEL_HEALTH = os.environ.get('LOG_LEVEL_HEALTH', 'INFO').upper()
 
 # =============================================================================
 # Security Settings
