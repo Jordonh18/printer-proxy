@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Pencil, Trash2, RefreshCw, ExternalLink } from 'lucide-react';
+import { Loader2, Pencil, Trash2, RefreshCw, ExternalLink, FileText } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { PrinterStatus } from '@/types/api';
 
@@ -132,6 +132,10 @@ export function PrinterDetailPage() {
             <Button variant="outline" onClick={() => refreshMutation.mutate()} disabled={refreshMutation.isPending}>
               <RefreshCw className={`h-4 w-4 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
               Refresh
+            </Button>
+            <Button variant="outline" onClick={() => navigate(`/printers/${id}/logs`)}>
+              <FileText className="h-4 w-4" />
+              View Logs
             </Button>
             <Button variant="outline" onClick={() => navigate(`/printers?edit=${id}`)}>
               <Pencil className="h-4 w-4" />

@@ -16,6 +16,9 @@ APScheduler==3.11.2
 # Encryption for integration credentials
 cryptography==42.0.0
 
+# Syslog RFC 5424 parsing
+syslog-rfc5424-parser==0.3.2
+
 # Logging
 python-json-logger==2.0.7
 

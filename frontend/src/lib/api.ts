@@ -248,12 +248,21 @@ export const printersApi = {
     department?: string;
     notes?: string;
     protocols?: string[];
+    syslog_enabled?: boolean;
+    snmp_version?: 'v2c' | 'v3';
+    snmp_read_community?: string;
+    snmp_write_community?: string;
+    snmp_v3_username?: string;
+    snmp_v3_auth_protocol?: string;
+    snmp_v3_auth_password?: string;
+    snmp_v3_priv_protocol?: string;
+    snmp_v3_priv_password?: string;
   }) => {
     const response = await api.post('/printers', data);
     return response.data;
   },
 
-  update: async (id: string, data: { name?: string; ip?: string; location?: string; model?: string }) => {
+  update: async (id: string, data: { name?: string; ip?: string; location?: string; model?: string; syslog_enabled?: boolean; snmp_version?: 'v2c' | 'v3'; snmp_read_community?: string; snmp_write_community?: string; snmp_v3_username?: string; snmp_v3_auth_protocol?: string; snmp_v3_auth_password?: string; snmp_v3_priv_protocol?: string; snmp_v3_priv_password?: string }) => {
     const response = await api.put(`/printers/${id}`, data);
     return response.data;
   },
@@ -283,11 +292,6 @@ export const printersApi = {
     return response.data;
   },
 
-  getLogs: async (id: string) => {
-    const response = await api.get(`/printers/${id}/logs`);
-    return response.data;
-  },
-
   getAudit: async (id: string) => {
     const response = await api.get(`/printers/${id}/audit`);
     return response.data;
@@ -300,6 +304,32 @@ export const printersApi = {
 
   refresh: async (id: string) => {
     const response = await api.get(`/printers/${id}/refresh`);
+    return response.data;
+  },
+
+  // Syslog methods
+  getSyslogMessages: async (id: string, params?: { limit?: number; offset?: number; severity?: number; search?: string }) => {
+    const response = await api.get(`/printers/${id}/syslog`, { params });
+    return response.data;
+  },
+
+  getSyslogConfig: async (id: string) => {
+    const response = await api.get(`/printers/${id}/syslog-config`);
+    return response.data;
+  },
+
+  updateSyslogConfig: async (id: string, data: { syslog_enabled: boolean }) => {
+    const response = await api.put(`/printers/${id}/syslog-config`, data);
+    return response.data;
+  },
+
+  testSyslogConnection: async (id: string) => {
+    const response = await api.post(`/printers/${id}/test-syslog`);
+    return response.data;
+  },
+
+  autoConfigureSyslog: async (id: string, data: { write_community?: string; save_community?: boolean }) => {
+    const response = await api.post(`/printers/${id}/auto-configure-syslog`, data);
     return response.data;
   },
 };

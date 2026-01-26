@@ -94,7 +94,20 @@
 - [x] Dashboard with status overview
 - [x] Debian package builds
 - [x] **Auto-Update System** - Check GitHub releases, one-click update from web UI
+- [x] **Syslog Receiver** - Receive RFC 5424 logs from printers on port 5140
+- [x] **HP SNMP Auto-Configuration** - Automatically configure HP printers to send syslog to Continuum
 
+---
 
+## 🔮 Future Enhancements
+
+### Printer Syslog Vendor Expansion
+- [ ] Add Canon SNMP OID mappings for syslog server auto-configuration
+- [ ] Add Xerox SNMP OID mappings for syslog server auto-configuration
+- [ ] Add Epson SNMP OID mappings for syslog server auto-configuration
+- [ ] Add Brother SNMP OID mappings for syslog server auto-configuration
+- [ ] Research web services API approach for printers without SNMP write support
+
+---
 
 auto snapshots and backups of data allowing rollback at any time incase of a configuraton issue or update etc.

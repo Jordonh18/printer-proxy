@@ -165,11 +165,3 @@ def get_queue_collector() -> PrintQueueCollector:
 def get_queue(ip: str) -> List[PrintJob]:
     """Get print queue for a printer by IP."""
     return get_queue_collector().get_queue(ip)
-
-
-# Backwards compatibility - import from event_logs module
-# This allows existing code that imports from print_queue to still work
-from app.services.event_logs import get_logs, get_errors, PrinterEvent
-
-# Legacy alias for PrinterError -> PrinterEvent
-PrinterError = PrinterEvent

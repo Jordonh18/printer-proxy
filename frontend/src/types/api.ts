@@ -31,6 +31,18 @@ export interface Printer {
   department?: string;
   notes?: string;
   protocols?: string[];
+  syslog_enabled?: boolean;
+  // SNMP Configuration
+  snmp_version?: 'v2c' | 'v3';
+  snmp_enabled?: boolean;
+  snmp_read_community?: string;
+  snmp_write_community?: string;
+  // SNMPv3 fields
+  snmp_v3_username?: string;
+  snmp_v3_auth_protocol?: 'MD5' | 'SHA' | 'SHA-224' | 'SHA-256' | 'SHA-384' | 'SHA-512';
+  snmp_v3_auth_password?: string;
+  snmp_v3_priv_protocol?: 'DES' | 'AES' | 'AES-192' | 'AES-256';
+  snmp_v3_priv_password?: string;
 }
 
 export interface PrinterStatus {
@@ -533,6 +545,75 @@ export interface IntegrationConnectionHistoryEntry {
   status?: string;
   error_message?: string;
   created_at: string;
+}
+
+// Syslog types
+export type SyslogSeverity = 'emergency' | 'alert' | 'critical' | 'error' | 'warning' | 'notice' | 'info' | 'debug';
+
+export interface SyslogMessage {
+  id: number;
+  printer_id: string | null;
+  printer_ip: string;
+  received_at: string;
+  facility: number;
+  facility_name: string;
+  severity: number;
+  severity_name: SyslogSeverity;
+  hostname: string | null;
+  app_name: string | null;
+  proc_id: string | null;
+  msg_id: string | null;
+  message: string;
+}
+
+export interface SyslogMessagesResponse {
+  messages: SyslogMessage[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface SyslogConfig {
+  printer_id: string;
+  syslog_enabled: boolean;
+  syslog_configured_at: string | null;
+  server_ip: string;
+  server_port: number;
+  syslog_destination: string;
+}
+
+export interface SyslogTestResult {
+  success: boolean;
+  receiving: boolean;
+  last_message_at: string | null;
+  message: string;
+}
+
+export interface SyslogAutoConfigResult {
+  success: boolean;
+  message: string;
+  error?: string;
+  result?: {
+    printer_ip: string;
+    syslog_server: string;
+    syslog_port: number;
+    operations: Record<string, { success: boolean; error?: string }>;
+  };
+}
+
+export interface SyslogServerStats {
+  port: number;
+  received: number;
+  malformed: number;
+  errors: number;
+  queue_dropped: number;
+  rate_limiting: Record<string, { accepted: number; rejected: number }>;
+  queue: {
+    queued: number;
+    max_size: number;
+    processed: number;
+    dropped: number;
+  };
 }
 
 

@@ -25,6 +25,18 @@ class Printer:
     model: str
     department: str
     notes: str
+    syslog_enabled: bool
+    # SNMP Configuration
+    snmp_version: str = 'v2c'
+    snmp_enabled: bool = False
+    snmp_read_community: Optional[str] = None
+    snmp_write_community: Optional[str] = None
+    # SNMPv3 fields
+    snmp_v3_username: Optional[str] = None
+    snmp_v3_auth_protocol: Optional[str] = None
+    snmp_v3_auth_password: Optional[str] = None
+    snmp_v3_priv_protocol: Optional[str] = None
+    snmp_v3_priv_password: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -35,13 +47,47 @@ class Printer:
             "location": self.location,
             "model": self.model,
             "department": self.department,
-            "notes": self.notes
+            "notes": self.notes,
+            "syslog_enabled": self.syslog_enabled,
+            # SNMP Configuration
+            "snmp_version": self.snmp_version,
+            "snmp_enabled": self.snmp_enabled,
+            "snmp_read_community": self.snmp_read_community,
+            "snmp_write_community": self.snmp_write_community,
+            "snmp_v3_username": self.snmp_v3_username,
+            "snmp_v3_auth_protocol": self.snmp_v3_auth_protocol,
+            "snmp_v3_auth_password": self.snmp_v3_auth_password,
+            "snmp_v3_priv_protocol": self.snmp_v3_priv_protocol,
+            "snmp_v3_priv_password": self.snmp_v3_priv_password,
         }
     
     @classmethod
     def from_row(cls, row) -> 'Printer':
         """Create a Printer from a database row."""
         protocols = row['protocols'].split(',') if row['protocols'] else ['raw']
+        try:
+            syslog_enabled = bool(row['syslog_enabled'])
+        except (KeyError, IndexError):
+            syslog_enabled = False
+        
+        # Handle SNMP fields with defaults for backwards compatibility
+        try:
+            snmp_version = row['snmp_version'] or 'v2c'
+        except (KeyError, IndexError):
+            snmp_version = 'v2c'
+        
+        try:
+            snmp_enabled = bool(row['snmp_enabled'])
+        except (KeyError, IndexError):
+            snmp_enabled = False
+        
+        # Helper function to safely get optional SNMP fields
+        def safe_get(key):
+            try:
+                return row[key]
+            except (KeyError, IndexError):
+                return None
+        
         return cls(
             id=row['id'],
             name=row['name'],
@@ -50,7 +96,18 @@ class Printer:
             location=row['location'] or '',
             model=row['model'] or '',
             department=row['department'] or '',
-            notes=row['notes'] or ''
+            notes=row['notes'] or '',
+            syslog_enabled=syslog_enabled,
+            # SNMP Configuration
+            snmp_version=snmp_version,
+            snmp_enabled=snmp_enabled,
+            snmp_read_community=safe_get('snmp_read_community'),
+            snmp_write_community=safe_get('snmp_write_community'),
+            snmp_v3_username=safe_get('snmp_v3_username'),
+            snmp_v3_auth_protocol=safe_get('snmp_v3_auth_protocol'),
+            snmp_v3_auth_password=safe_get('snmp_v3_auth_password'),
+            snmp_v3_priv_protocol=safe_get('snmp_v3_priv_protocol'),
+            snmp_v3_priv_password=safe_get('snmp_v3_priv_password'),
         )
 
 
@@ -318,8 +375,13 @@ class PrinterRegistry:
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO printers (id, name, ip, protocols, location, model, department, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO printers (
+                    id, name, ip, protocols, location, model, department, notes, syslog_enabled,
+                    snmp_version, snmp_enabled, snmp_read_community, snmp_write_community,
+                    snmp_v3_username, snmp_v3_auth_protocol, snmp_v3_auth_password,
+                    snmp_v3_priv_protocol, snmp_v3_priv_password
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 printer.id,
                 printer.name,
@@ -328,7 +390,17 @@ class PrinterRegistry:
                 printer.location,
                 printer.model,
                 printer.department,
-                printer.notes
+                printer.notes,
+                1 if printer.syslog_enabled else 0,
+                printer.snmp_version,
+                1 if printer.snmp_enabled else 0,
+                printer.snmp_read_community,
+                printer.snmp_write_community,
+                printer.snmp_v3_username,
+                printer.snmp_v3_auth_protocol,
+                printer.snmp_v3_auth_password,
+                printer.snmp_v3_priv_protocol,
+                printer.snmp_v3_priv_password
             ))
             conn.commit()
             conn.close()
@@ -345,7 +417,11 @@ class PrinterRegistry:
             cursor.execute("""
                 UPDATE printers 
                 SET name = ?, ip = ?, protocols = ?, location = ?, 
-                    model = ?, department = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                    model = ?, department = ?, notes = ?, syslog_enabled = ?,
+                    snmp_version = ?, snmp_enabled = ?, snmp_read_community = ?, snmp_write_community = ?,
+                    snmp_v3_username = ?, snmp_v3_auth_protocol = ?, snmp_v3_auth_password = ?,
+                    snmp_v3_priv_protocol = ?, snmp_v3_priv_password = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (
                 printer.name,
@@ -355,6 +431,16 @@ class PrinterRegistry:
                 printer.model,
                 printer.department,
                 printer.notes,
+                1 if printer.syslog_enabled else 0,
+                printer.snmp_version,
+                1 if printer.snmp_enabled else 0,
+                printer.snmp_read_community,
+                printer.snmp_write_community,
+                printer.snmp_v3_username,
+                printer.snmp_v3_auth_protocol,
+                printer.snmp_v3_auth_password,
+                printer.snmp_v3_priv_protocol,
+                printer.snmp_v3_priv_password,
                 printer.id
             ))
             affected = cursor.rowcount

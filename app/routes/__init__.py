@@ -775,6 +775,18 @@ def api_printer_create():
     model = data.get('model', '').strip()
     department = data.get('department', '').strip()
     notes = data.get('notes', '').strip()
+    syslog_enabled = data.get('syslog_enabled', False)
+    
+    # SNMP Configuration
+    snmp_version = data.get('snmp_version', 'v2c')
+    snmp_enabled = data.get('snmp_enabled', False)
+    snmp_read_community = data.get('snmp_read_community')
+    snmp_write_community = data.get('snmp_write_community')
+    snmp_v3_username = data.get('snmp_v3_username')
+    snmp_v3_auth_protocol = data.get('snmp_v3_auth_protocol')
+    snmp_v3_auth_password = data.get('snmp_v3_auth_password')
+    snmp_v3_priv_protocol = data.get('snmp_v3_priv_protocol')
+    snmp_v3_priv_password = data.get('snmp_v3_priv_password')
 
     protocols_raw = data.get('protocols')
     if isinstance(protocols_raw, str):
@@ -807,7 +819,18 @@ def api_printer_create():
             location=location,
             model=model,
             department=department,
-            notes=notes
+            notes=notes,
+            syslog_enabled=syslog_enabled,
+            # SNMP Configuration
+            snmp_version=snmp_version,
+            snmp_enabled=snmp_enabled,
+            snmp_read_community=snmp_read_community,
+            snmp_write_community=snmp_write_community,
+            snmp_v3_username=snmp_v3_username,
+            snmp_v3_auth_protocol=snmp_v3_auth_protocol,
+            snmp_v3_auth_password=snmp_v3_auth_password,
+            snmp_v3_priv_protocol=snmp_v3_priv_protocol,
+            snmp_v3_priv_password=snmp_v3_priv_password
         )
         success = registry.add_printer(printer)
         if not success:
@@ -856,7 +879,8 @@ def api_printer_create():
             'model': printer.model,
             'protocols': printer.protocols,
             'department': printer.department,
-            'notes': printer.notes
+            'notes': printer.notes,
+            'syslog_enabled': printer.syslog_enabled
         }), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -882,6 +906,18 @@ def api_printer_update(printer_id):
     model = data.get('model', printer.model or '').strip()
     department = data.get('department', printer.department or '').strip()
     notes = data.get('notes', printer.notes or '').strip()
+    syslog_enabled = data.get('syslog_enabled', printer.syslog_enabled if hasattr(printer, 'syslog_enabled') else False)
+    
+    # SNMP Configuration
+    snmp_version = data.get('snmp_version', getattr(printer, 'snmp_version', 'v2c'))
+    snmp_enabled = data.get('snmp_enabled', getattr(printer, 'snmp_enabled', False))
+    snmp_read_community = data.get('snmp_read_community', getattr(printer, 'snmp_read_community', None))
+    snmp_write_community = data.get('snmp_write_community', getattr(printer, 'snmp_write_community', None))
+    snmp_v3_username = data.get('snmp_v3_username', getattr(printer, 'snmp_v3_username', None))
+    snmp_v3_auth_protocol = data.get('snmp_v3_auth_protocol', getattr(printer, 'snmp_v3_auth_protocol', None))
+    snmp_v3_auth_password = data.get('snmp_v3_auth_password', getattr(printer, 'snmp_v3_auth_password', None))
+    snmp_v3_priv_protocol = data.get('snmp_v3_priv_protocol', getattr(printer, 'snmp_v3_priv_protocol', None))
+    snmp_v3_priv_password = data.get('snmp_v3_priv_password', getattr(printer, 'snmp_v3_priv_password', None))
 
     protocols_raw = data.get('protocols', printer.protocols)
     if isinstance(protocols_raw, str):
@@ -911,6 +947,17 @@ def api_printer_update(printer_id):
         printer.department = department
         printer.notes = notes
         printer.protocols = protocols
+        printer.syslog_enabled = syslog_enabled
+        # SNMP Configuration
+        printer.snmp_version = snmp_version
+        printer.snmp_enabled = snmp_enabled
+        printer.snmp_read_community = snmp_read_community
+        printer.snmp_write_community = snmp_write_community
+        printer.snmp_v3_username = snmp_v3_username
+        printer.snmp_v3_auth_protocol = snmp_v3_auth_protocol
+        printer.snmp_v3_auth_password = snmp_v3_auth_password
+        printer.snmp_v3_priv_protocol = snmp_v3_priv_protocol
+        printer.snmp_v3_priv_password = snmp_v3_priv_password
         success = registry.update_printer(printer)
         if not success:
             return jsonify({'error': 'Failed to update printer'}), 500
@@ -932,7 +979,8 @@ def api_printer_update(printer_id):
             'model': printer.model,
             'protocols': printer.protocols,
             'department': printer.department,
-            'notes': printer.notes
+            'notes': printer.notes,
+            'syslog_enabled': printer.syslog_enabled
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1562,22 +1610,6 @@ def api_printer_job_history(printer_id):
     return jsonify({'jobs': [job.to_dict() for job in jobs]})
 
 
-@api_bp.route('/printers/<printer_id>/logs')
-@api_auth_required
-def api_printer_logs(printer_id):
-    """Get device event logs for a printer."""
-    from app.services.event_logs import get_logs
-
-    registry = get_registry()
-    printer = registry.get_by_id(printer_id)
-
-    if not printer:
-        return jsonify({'error': 'Printer not found'}), 404
-
-    events = get_logs(printer.ip)
-    return jsonify({'events': [event.to_dict() for event in events]})
-
-
 @api_bp.route('/printers/<printer_id>/audit')
 @api_auth_required
 def api_printer_audit(printer_id):
@@ -1587,6 +1619,267 @@ def api_printer_audit(printer_id):
     limit = int(request.args.get('limit', 20))
     logs = AuditLog.get_by_printer(printer_id, limit=limit)
     return jsonify({'logs': logs})
+
+
+# ============================================================================
+# Printer Syslog API Routes
+# ============================================================================
+
+@api_bp.route('/printers/<printer_id>/syslog')
+@api_auth_required
+def api_printer_syslog(printer_id):
+    """Get syslog messages for a printer."""
+    from app.services.syslog_server import get_syslog_receiver
+    
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+    
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+    
+    receiver = get_syslog_receiver()
+    if not receiver:
+        return jsonify({'error': 'Syslog receiver is not running'}), 503
+    
+    # Parse query parameters
+    limit = int(request.args.get('limit', 100))
+    offset = int(request.args.get('offset', 0))
+    severity = request.args.get('severity')
+    search = request.args.get('search')
+    
+    severity_int = int(severity) if severity else None
+    
+    messages, total = receiver.get_messages(
+        printer_id=printer_id,
+        severity=severity_int,
+        limit=limit,
+        offset=offset,
+        search=search
+    )
+    
+    return jsonify({
+        'messages': [m.to_dict() for m in messages],
+        'total': total,
+        'limit': limit,
+        'offset': offset
+    })
+
+
+@api_bp.route('/printers/<printer_id>/syslog-config', methods=['GET'])
+@api_auth_required
+def api_printer_syslog_config_get(printer_id):
+    """Get syslog configuration for a printer."""
+    from config.config import SYSLOG_SERVER_PORT, MANAGEMENT_IP
+    
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+    
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+    
+    # Get syslog status from database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT syslog_enabled, syslog_configured_at FROM printers WHERE id = ?",
+        (printer_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    
+    syslog_enabled = bool(row['syslog_enabled']) if row else False
+    configured_at = row['syslog_configured_at'] if row else None
+    
+    return jsonify({
+        'printer_id': printer_id,
+        'syslog_enabled': syslog_enabled,
+        'syslog_configured_at': configured_at,
+        'server_ip': MANAGEMENT_IP,
+        'server_port': SYSLOG_SERVER_PORT,
+        'syslog_destination': f"{MANAGEMENT_IP}:{SYSLOG_SERVER_PORT}"
+    })
+
+
+@api_bp.route('/printers/<printer_id>/syslog-config', methods=['PUT'])
+@api_role_required('admin', 'operator')
+def api_printer_syslog_config_update(printer_id):
+    """Update syslog configuration for a printer."""
+    from datetime import datetime
+    
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+    
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+    
+    syslog_enabled = data.get('syslog_enabled', False)
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if syslog_enabled:
+        cursor.execute(
+            "UPDATE printers SET syslog_enabled = 1, syslog_configured_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), printer_id)
+        )
+    else:
+        cursor.execute(
+            "UPDATE printers SET syslog_enabled = 0, syslog_configured_at = NULL WHERE id = ?",
+            (printer_id,)
+        )
+    
+    conn.commit()
+    conn.close()
+    
+    # Audit log
+    AuditLog.log(
+        username=g.api_user.username,
+        action='syslog_config_updated',
+        source_printer_id=printer_id,
+        details=f"Syslog {'enabled' if syslog_enabled else 'disabled'}"
+    )
+    
+    return jsonify({
+        'success': True,
+        'syslog_enabled': syslog_enabled
+    })
+
+
+@api_bp.route('/printers/<printer_id>/test-syslog', methods=['POST'])
+@api_auth_required
+def api_printer_test_syslog(printer_id):
+    """Test syslog connection by checking for recent messages."""
+    from app.services.syslog_server import get_syslog_receiver
+    
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+    
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+    
+    receiver = get_syslog_receiver()
+    if not receiver:
+        return jsonify({'error': 'Syslog receiver is not running'}), 503
+    
+    last_message_time = receiver.get_last_message_time(printer.ip)
+    
+    if last_message_time:
+        return jsonify({
+            'success': True,
+            'receiving': True,
+            'last_message_at': last_message_time.isoformat(),
+            'message': f'Last message received at {last_message_time.strftime("%Y-%m-%d %H:%M:%S")}'
+        })
+    else:
+        return jsonify({
+            'success': True,
+            'receiving': False,
+            'last_message_at': None,
+            'message': 'No syslog messages received from this printer yet. Ensure the printer is configured to send logs to this server.'
+        })
+
+
+@api_bp.route('/printers/<printer_id>/auto-configure-syslog', methods=['POST'])
+@api_role_required('admin')
+def api_printer_auto_configure_syslog(printer_id):
+    """Auto-configure printer to send syslog to this server (HP only)."""
+    from app.services.printer_config import configure_hp_syslog, PrinterConfigError
+    from app.utils.encryption import encrypt_credential
+    from config.config import SYSLOG_SERVER_PORT, MANAGEMENT_IP
+    from datetime import datetime
+    
+    registry = get_registry()
+    printer = registry.get_by_id(printer_id)
+    
+    if not printer:
+        return jsonify({'error': 'Printer not found'}), 404
+    
+    data = request.get_json() or {}
+    write_community = data.get('write_community', 'public')
+    save_community = data.get('save_community', False)
+    
+    try:
+        # Attempt to configure the printer
+        result = configure_hp_syslog(
+            printer_ip=printer.ip,
+            syslog_server=MANAGEMENT_IP,
+            syslog_port=SYSLOG_SERVER_PORT,
+            write_community=write_community
+        )
+        
+        # Update database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if save_community:
+            encrypted_community = encrypt_credential(write_community)
+            cursor.execute(
+                "UPDATE printers SET syslog_enabled = 1, syslog_configured_at = ?, snmp_write_community = ? WHERE id = ?",
+                (datetime.now().isoformat(), encrypted_community, printer_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE printers SET syslog_enabled = 1, syslog_configured_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), printer_id)
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        # Audit log
+        AuditLog.log(
+            username=g.api_user.username,
+            action='syslog_auto_configured',
+            source_printer_id=printer_id,
+            details='SNMP auto-configuration successful'
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully configured {printer.name} to send syslog to {MANAGEMENT_IP}:{SYSLOG_SERVER_PORT}',
+            'result': result
+        })
+    
+    except ImportError as e:
+        return jsonify({
+            'success': False,
+            'error': 'pysnmp library not installed',
+            'message': 'SNMP auto-configuration requires pysnmp. Please install dependencies with: pip install -r requirements.txt'
+        }), 400
+        
+    except PrinterConfigError as e:
+        # Audit log failure
+        AuditLog.log(
+            username=g.api_user.username,
+            action='syslog_auto_configure_failed',
+            source_printer_id=printer_id,
+            details=f'SNMP auto-configuration failed: {str(e)}',
+            success=False,
+            error_message=str(e)
+        )
+        
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Auto-configuration failed. Please configure the printer manually.'
+        }), 400
+
+
+@api_bp.route('/syslog/stats')
+@api_role_required('admin')
+def api_syslog_stats():
+    """Get syslog server statistics."""
+    from app.services.syslog_server import get_syslog_receiver
+    
+    receiver = get_syslog_receiver()
+    if not receiver:
+        return jsonify({'error': 'Syslog receiver is not running', 'status': 'stopped'}), 503
+    
+    return jsonify(receiver.get_stats())
 
 
 # ============================================================================

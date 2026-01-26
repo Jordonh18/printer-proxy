@@ -11,6 +11,13 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -49,6 +56,7 @@ export function PrintersPage() {
     hostname?: string;
     tcp_9100_open?: boolean;
     snmp_available?: boolean;
+    syslog_enabled?: boolean;
   }>>([]);
   const [importedIps, setImportedIps] = useState<Set<string>>(new Set());
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -64,6 +72,17 @@ export function PrintersPage() {
     ip: '',
     location: '',
     model: '',
+    syslog_enabled: false,
+    // SNMP Configuration
+    snmp_version: 'v2c' as 'v2c' | 'v3',
+    snmp_read_community: 'public',
+    snmp_write_community: 'public',
+    // SNMPv3 fields
+    snmp_v3_username: '',
+    snmp_v3_auth_protocol: 'SHA' as 'MD5' | 'SHA' | 'SHA-224' | 'SHA-256' | 'SHA-384' | 'SHA-512',
+    snmp_v3_auth_password: '',
+    snmp_v3_priv_protocol: 'AES' as 'DES' | 'AES' | 'AES-192' | 'AES-256',
+    snmp_v3_priv_password: '',
   });
   const [printerForm, setPrinterForm] = useState({
     name: '',
@@ -73,6 +92,17 @@ export function PrintersPage() {
     department: '',
     notes: '',
     protocols: ['raw'] as string[],
+    syslog_enabled: false,
+    // SNMP Configuration
+    snmp_version: 'v2c' as 'v2c' | 'v3',
+    snmp_read_community: 'public',
+    snmp_write_community: 'public',
+    // SNMPv3 fields
+    snmp_v3_username: '',
+    snmp_v3_auth_protocol: 'SHA' as 'MD5' | 'SHA' | 'SHA-224' | 'SHA-256' | 'SHA-384' | 'SHA-512',
+    snmp_v3_auth_password: '',
+    snmp_v3_priv_protocol: 'AES' as 'DES' | 'AES' | 'AES-192' | 'AES-256',
+    snmp_v3_priv_password: '',
   });
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -133,9 +163,22 @@ export function PrintersPage() {
       // Immediately mark as imported - continue in background
       setImportedIps((current) => new Set(current).add(variables.ip));
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: async (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['printers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      
+      // Auto-configure syslog if enabled
+      if (variables.syslog_enabled && data.id) {
+        try {
+          await printersApi.autoConfigureSyslog(data.id, { 
+            write_community: 'private',
+            save_community: false 
+          });
+        } catch (error) {
+          // Silently fail - printer is imported, just syslog auto-config failed
+          // This is expected for non-HP printers or printers with SNMP disabled
+        }
+      }
     },
     onError: (_error, variables) => {
       // Remove from imported if failed
@@ -148,11 +191,25 @@ export function PrintersPage() {
   });
 
   const updatePrinterMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name: string; ip: string; location?: string; model?: string } }) =>
+    mutationFn: ({ id, data }: { id: string; data: { name: string; ip: string; location?: string; model?: string; syslog_enabled?: boolean; snmp_version?: 'v2c' | 'v3'; snmp_read_community?: string; snmp_write_community?: string; snmp_v3_username?: string; snmp_v3_auth_protocol?: string; snmp_v3_auth_password?: string; snmp_v3_priv_protocol?: string; snmp_v3_priv_password?: string } }) =>
       printersApi.update(id, data),
-    onSuccess: () => {
+    onSuccess: async (_result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['printers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      
+      // Auto-configure syslog if being enabled
+      if (variables.data.syslog_enabled) {
+        try {
+          await printersApi.autoConfigureSyslog(variables.id, { 
+            write_community: 'private',
+            save_community: false 
+          });
+        } catch (error) {
+          // Silently fail - printer is updated, just syslog auto-config failed
+          // This is expected for non-HP printers or printers with SNMP disabled
+        }
+      }
+      
       setIsEditModalOpen(false);
       setEditError('');
       setEditPrinterId(null);
@@ -169,9 +226,23 @@ export function PrintersPage() {
 
   const createPrinterMutation = useMutation({
     mutationFn: printersApi.create,
-    onSuccess: () => {
+    onSuccess: async (data) => {
       queryClient.invalidateQueries({ queryKey: ['printers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      
+      // Auto-configure syslog if enabled
+      if (printerForm.syslog_enabled && data.id) {
+        try {
+          await printersApi.autoConfigureSyslog(data.id, { 
+            write_community: 'private',
+            save_community: false 
+          });
+        } catch (error) {
+          // Silently fail - printer is created, just syslog auto-config failed
+          // This is expected for non-HP printers or printers with SNMP disabled
+        }
+      }
+      
       setIsAddModalOpen(false);
       setPrinterForm({
         name: '',
@@ -181,6 +252,15 @@ export function PrintersPage() {
         department: '',
         notes: '',
         protocols: ['raw'],
+        syslog_enabled: false,
+        snmp_version: 'v2c',
+        snmp_read_community: 'public',
+        snmp_write_community: 'public',
+        snmp_v3_username: '',
+        snmp_v3_auth_protocol: 'SHA',
+        snmp_v3_auth_password: '',
+        snmp_v3_priv_protocol: 'AES',
+        snmp_v3_priv_password: '',
       });
       setAddError('');
     },
@@ -208,6 +288,16 @@ export function PrintersPage() {
       ip: printer.ip,
       location: printer.location || '',
       model: printer.model || '',
+      syslog_enabled: printer.syslog_enabled || false,
+      // SNMP Configuration
+      snmp_version: printer.snmp_version || 'v2c',
+      snmp_read_community: printer.snmp_read_community || 'public',
+      snmp_write_community: printer.snmp_write_community || 'public',
+      snmp_v3_username: printer.snmp_v3_username || '',
+      snmp_v3_auth_protocol: printer.snmp_v3_auth_protocol || 'SHA',
+      snmp_v3_auth_password: printer.snmp_v3_auth_password || '',
+      snmp_v3_priv_protocol: printer.snmp_v3_priv_protocol || 'AES',
+      snmp_v3_priv_password: printer.snmp_v3_priv_password || '',
     });
     setEditError('');
     setIsEditModalOpen(true);
@@ -396,6 +486,15 @@ export function PrintersPage() {
                 department: printerForm.department || undefined,
                 notes: printerForm.notes || undefined,
                 protocols: printerForm.protocols,
+                syslog_enabled: printerForm.syslog_enabled,
+                snmp_version: printerForm.snmp_version,
+                snmp_read_community: printerForm.snmp_read_community,
+                snmp_write_community: printerForm.snmp_write_community,
+                snmp_v3_username: printerForm.snmp_v3_username,
+                snmp_v3_auth_protocol: printerForm.snmp_v3_auth_protocol,
+                snmp_v3_auth_password: printerForm.snmp_v3_auth_password,
+                snmp_v3_priv_protocol: printerForm.snmp_v3_priv_protocol,
+                snmp_v3_priv_password: printerForm.snmp_v3_priv_password,
               });
             }}
             className="space-y-4"
@@ -494,6 +593,138 @@ export function PrintersPage() {
                 placeholder="Add any special instructions or maintenance notes..."
               />
             </div>
+
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold">SNMP Configuration</h4>
+              <p className="text-xs text-muted-foreground">SNMP protocol settings for printer monitoring and management.</p>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="snmp-version">SNMP Version</Label>
+                <Select
+                  value={printerForm.snmp_version}
+                    onValueChange={(value: 'v2c' | 'v3') => setPrinterForm({ ...printerForm, snmp_version: value })}
+                  >
+                    <SelectTrigger id="snmp-version">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="v2c">SNMPv2c (Community Strings)</SelectItem>
+                      <SelectItem value="v3">SNMPv3 (Authentication)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {printerForm.snmp_version === 'v2c' ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="snmp-read-community">Read Community</Label>
+                      <Input
+                        id="snmp-read-community"
+                        value={printerForm.snmp_read_community}
+                        onChange={(e) => setPrinterForm({ ...printerForm, snmp_read_community: e.target.value })}
+                        placeholder="public"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="snmp-write-community">Write Community</Label>
+                      <Input
+                        id="snmp-write-community"
+                        value={printerForm.snmp_write_community}
+                        onChange={(e) => setPrinterForm({ ...printerForm, snmp_write_community: e.target.value })}
+                        placeholder="public"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="snmp-v3-username">Username</Label>
+                      <Input
+                        id="snmp-v3-username"
+                        value={printerForm.snmp_v3_username}
+                        onChange={(e) => setPrinterForm({ ...printerForm, snmp_v3_username: e.target.value })}
+                        placeholder="snmpuser"
+                      />
+                    </div>
+                    
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="snmp-v3-auth-protocol">Auth Protocol</Label>
+                        <Select
+                          value={printerForm.snmp_v3_auth_protocol}
+                          onValueChange={(value: any) => setPrinterForm({ ...printerForm, snmp_v3_auth_protocol: value })}
+                        >
+                          <SelectTrigger id="snmp-v3-auth-protocol">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="MD5">MD5</SelectItem>
+                            <SelectItem value="SHA">SHA</SelectItem>
+                            <SelectItem value="SHA-224">SHA-224</SelectItem>
+                            <SelectItem value="SHA-256">SHA-256</SelectItem>
+                            <SelectItem value="SHA-384">SHA-384</SelectItem>
+                            <SelectItem value="SHA-512">SHA-512</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="snmp-v3-auth-password">Auth Password</Label>
+                        <Input
+                          id="snmp-v3-auth-password"
+                          type="password"
+                          value={printerForm.snmp_v3_auth_password}
+                          onChange={(e) => setPrinterForm({ ...printerForm, snmp_v3_auth_password: e.target.value })}
+                          placeholder="Authentication password"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="snmp-v3-priv-protocol">Privacy Protocol</Label>
+                        <Select
+                          value={printerForm.snmp_v3_priv_protocol}
+                          onValueChange={(value: any) => setPrinterForm({ ...printerForm, snmp_v3_priv_protocol: value })}
+                        >
+                          <SelectTrigger id="snmp-v3-priv-protocol">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="DES">DES</SelectItem>
+                            <SelectItem value="AES">AES</SelectItem>
+                            <SelectItem value="AES-192">AES-192</SelectItem>
+                            <SelectItem value="AES-256">AES-256</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="snmp-v3-priv-password">Privacy Password</Label>
+                        <Input
+                          id="snmp-v3-priv-password"
+                          type="password"
+                          value={printerForm.snmp_v3_priv_password}
+                          onChange={(e) => setPrinterForm({ ...printerForm, snmp_v3_priv_password: e.target.value })}
+                          placeholder="Privacy password"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold">Device Logs</h4>
+              <p className="text-xs text-muted-foreground">Configure printer to send syslog messages to Continuum.</p>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={printerForm.syslog_enabled}
+                onCheckedChange={(value) => setPrinterForm({ ...printerForm, syslog_enabled: value === true })}
+              />
+              Enable log collection
+            </label>
             <DialogFooter>
               <Button
                 type="button"
@@ -509,6 +740,15 @@ export function PrintersPage() {
                     department: '',
                     notes: '',
                     protocols: ['raw'],
+                    syslog_enabled: false,
+                    snmp_version: 'v2c',
+                    snmp_read_community: 'public',
+                    snmp_write_community: 'public',
+                    snmp_v3_username: '',
+                    snmp_v3_auth_protocol: 'SHA',
+                    snmp_v3_auth_password: '',
+                    snmp_v3_priv_protocol: 'AES',
+                    snmp_v3_priv_password: '',
                   });
                 }}
               >
@@ -540,6 +780,16 @@ export function PrintersPage() {
                   ip: editForm.ip,
                   location: editForm.location || undefined,
                   model: editForm.model || undefined,
+                  syslog_enabled: editForm.syslog_enabled,
+                  // SNMP Configuration
+                  snmp_version: editForm.snmp_version,
+                  snmp_read_community: editForm.snmp_read_community || undefined,
+                  snmp_write_community: editForm.snmp_write_community || undefined,
+                  snmp_v3_username: editForm.snmp_v3_username || undefined,
+                  snmp_v3_auth_protocol: editForm.snmp_v3_auth_protocol || undefined,
+                  snmp_v3_auth_password: editForm.snmp_v3_auth_password || undefined,
+                  snmp_v3_priv_protocol: editForm.snmp_v3_priv_protocol || undefined,
+                  snmp_v3_priv_password: editForm.snmp_v3_priv_password || undefined,
                 },
               });
             }}
@@ -583,6 +833,138 @@ export function PrintersPage() {
                   onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
                 />
               </div>
+            </div>
+            
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold">SNMP Configuration</h4>
+              <p className="text-xs text-muted-foreground">Configure SNMP for monitoring and management.</p>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-snmp-version">SNMP Version</Label>
+                <Select
+                  value={editForm.snmp_version}
+                  onValueChange={(value: 'v2c' | 'v3') => setEditForm({ ...editForm, snmp_version: value })}
+                >
+                  <SelectTrigger id="edit-snmp-version">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="v2c">SNMPv2c (Community Strings)</SelectItem>
+                    <SelectItem value="v3">SNMPv3 (Authentication)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+                {editForm.snmp_version === 'v2c' ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-snmp-read-community">Read Community</Label>
+                      <Input
+                        id="edit-snmp-read-community"
+                        value={editForm.snmp_read_community}
+                        onChange={(e) => setEditForm({ ...editForm, snmp_read_community: e.target.value })}
+                        placeholder="public"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-snmp-write-community">Write Community</Label>
+                      <Input
+                        id="edit-snmp-write-community"
+                        value={editForm.snmp_write_community}
+                        onChange={(e) => setEditForm({ ...editForm, snmp_write_community: e.target.value })}
+                        placeholder="public"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-snmp-v3-username">Username</Label>
+                      <Input
+                        id="edit-snmp-v3-username"
+                        value={editForm.snmp_v3_username}
+                        onChange={(e) => setEditForm({ ...editForm, snmp_v3_username: e.target.value })}
+                        placeholder="snmpuser"
+                      />
+                    </div>
+                    
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-snmp-v3-auth-protocol">Auth Protocol</Label>
+                        <Select
+                          value={editForm.snmp_v3_auth_protocol}
+                          onValueChange={(value: any) => setEditForm({ ...editForm, snmp_v3_auth_protocol: value })}
+                        >
+                          <SelectTrigger id="edit-snmp-v3-auth-protocol">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="MD5">MD5</SelectItem>
+                            <SelectItem value="SHA">SHA</SelectItem>
+                            <SelectItem value="SHA-224">SHA-224</SelectItem>
+                            <SelectItem value="SHA-256">SHA-256</SelectItem>
+                            <SelectItem value="SHA-384">SHA-384</SelectItem>
+                            <SelectItem value="SHA-512">SHA-512</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-snmp-v3-auth-password">Auth Password</Label>
+                        <Input
+                          id="edit-snmp-v3-auth-password"
+                          type="password"
+                          value={editForm.snmp_v3_auth_password}
+                          onChange={(e) => setEditForm({ ...editForm, snmp_v3_auth_password: e.target.value })}
+                          placeholder="Authentication password"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-snmp-v3-priv-protocol">Privacy Protocol</Label>
+                        <Select
+                          value={editForm.snmp_v3_priv_protocol}
+                          onValueChange={(value: any) => setEditForm({ ...editForm, snmp_v3_priv_protocol: value })}
+                        >
+                          <SelectTrigger id="edit-snmp-v3-priv-protocol">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="DES">DES</SelectItem>
+                            <SelectItem value="AES">AES</SelectItem>
+                            <SelectItem value="AES-192">AES-192</SelectItem>
+                            <SelectItem value="AES-256">AES-256</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-snmp-v3-priv-password">Privacy Password</Label>
+                        <Input
+                          id="edit-snmp-v3-priv-password"
+                          type="password"
+                          value={editForm.snmp_v3_priv_password}
+                          onChange={(e) => setEditForm({ ...editForm, snmp_v3_priv_password: e.target.value })}
+                          placeholder="Privacy password"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            <div className="space-y-2">
+              <Label>Device Logs</Label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={editForm.syslog_enabled}
+                  onCheckedChange={(value) => setEditForm({ ...editForm, syslog_enabled: value === true })}
+                />
+                Enable log collection
+              </label>
+              <p className="text-xs text-muted-foreground">Configure printer to send syslog messages to Continuum.</p>
             </div>
             <DialogFooter>
               <Button
@@ -704,6 +1086,7 @@ export function PrintersPage() {
                               <TableHead className="px-4">Host</TableHead>
                               <TableHead className="px-4">Method</TableHead>
                               <TableHead className="px-4">Caps</TableHead>
+                              <TableHead className="px-4 text-center">Logs</TableHead>
                               <TableHead className="px-4 text-right">Action</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -773,6 +1156,20 @@ export function PrintersPage() {
                                     )}
                                   </div>
                                 </TableCell>
+                                <TableCell className="px-4 text-center">
+                                  <Checkbox
+                                    checked={printer.syslog_enabled || false}
+                                    onCheckedChange={(value) =>
+                                      setDiscoverResults((current) =>
+                                        current.map((item) =>
+                                          item.ip === printer.ip
+                                            ? { ...item, syslog_enabled: value === true }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </TableCell>
                                 <TableCell className="px-4 text-right">
                                   <Button
                                     variant="outline"
@@ -783,6 +1180,7 @@ export function PrintersPage() {
                                         model: printer.model || undefined,
                                         location: printer.location || undefined,
                                         protocols: printer.tcp_9100_open ? ['raw'] : undefined,
+                                        syslog_enabled: printer.syslog_enabled || false,
                                       })
                                     }
                                     disabled={importedIps.has(printer.ip)}

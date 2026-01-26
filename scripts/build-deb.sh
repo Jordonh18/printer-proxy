@@ -123,7 +123,7 @@ Version: ${VERSION}
 Section: net
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.9), python3-venv, python3-pip, adduser, iptables, iproute2, iputils-ping, arping, nginx, openssl
+Depends: python3 (>= 3.9), python3-venv, python3-pip, adduser, iptables, iproute2, iputils-ping, arping, nginx, openssl, libcap2-bin
 Recommends: snmp
 Suggests: ufw
 Maintainer: Jordon Harrison <jordonh18@users.noreply.github.com>
@@ -141,6 +141,7 @@ Description: Network printer traffic redirection tool with web interface
   * Full audit logging of all configuration changes
   * Support for TCP 9100 (RAW/JetDirect) printing protocol
   * Printer health monitoring with SNMP and ICMP checks
+  * Syslog receiver for centralized device log collection
 EOF
 
 # Copy maintainer scripts

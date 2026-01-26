@@ -115,6 +115,22 @@ def create_app() -> Flask:
         else:
             app.logger.info("No printers registered; deferring polling services")
         
+        # Start the syslog receiver server
+        from app.services.syslog_server import init_syslog_receiver
+        from config.config import (
+            SYSLOG_SERVER_ENABLED, SYSLOG_SERVER_PORT, 
+            SYSLOG_RETENTION_DAYS, DATABASE_PATH
+        )
+        if SYSLOG_SERVER_ENABLED:
+            init_syslog_receiver(
+                db_path=str(DATABASE_PATH),
+                port=SYSLOG_SERVER_PORT,
+                retention_days=SYSLOG_RETENTION_DAYS,
+                enabled=True
+            )
+        else:
+            app.logger.info("Syslog receiver is disabled in configuration")
+        
         # Start the auto-update checker
         from app.services.updater import init_updater
         init_updater(start_background=True)

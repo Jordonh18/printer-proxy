@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { integrationsApi } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -40,8 +40,6 @@ import { toast } from '@/lib/toast';
 import type {
   IntegrationMetadata,
   IntegrationConnection,
-  IntegrationEventRouting,
-  IntegrationEventType,
 } from '@/types/api';
 
 // Integration logos - use real icon files from public/icons where available
@@ -775,9 +773,9 @@ export function AdminIntegrationsPage() {
                 <Input
                   id={`config-${field.name}`}
                   type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
-                  value={(field.secret ? connectionForm.credentials[field.name] : connectionForm.config[field.name] as string) || ''}
+                  value={(field.sensitive ? connectionForm.credentials[field.name] : connectionForm.config[field.name] as string) || ''}
                   onChange={(e) => {
-                    if (field.secret) {
+                    if (field.sensitive) {
                       setConnectionForm({
                         ...connectionForm,
                         credentials: { ...connectionForm.credentials, [field.name]: e.target.value },

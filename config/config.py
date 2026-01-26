@@ -194,3 +194,14 @@ LOCKOUT_DURATION_MINUTES = 15
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or _get_or_create_secret_key(DATA_DIR) + '-jwt'
 JWT_ACCESS_TOKEN_EXPIRES_HOURS = 24
 JWT_REFRESH_TOKEN_EXPIRES_DAYS = 30
+
+# =============================================================================
+# Syslog Server Settings
+# =============================================================================
+
+SYSLOG_SERVER_ENABLED = os.environ.get('SYSLOG_SERVER_ENABLED', 'true').lower() == 'true'
+SYSLOG_SERVER_PORT = int(os.environ.get('SYSLOG_SERVER_PORT', '514'))
+SYSLOG_RETENTION_DAYS = int(os.environ.get('SYSLOG_RETENTION_DAYS', '30'))
+SYSLOG_MAX_MESSAGES_PER_SECOND = int(os.environ.get('SYSLOG_MAX_MESSAGES_PER_SECOND', '100'))
+SYSLOG_BURST_SIZE = int(os.environ.get('SYSLOG_BURST_SIZE', '500'))
+SYSLOG_QUEUE_SIZE = int(os.environ.get('SYSLOG_QUEUE_SIZE', '10000'))

@@ -171,9 +171,6 @@ class JobMonitor:
         if current_page_count is None:
             logger.debug(f"Could not get page count for {ip}")
             return
-            
-        # Get job events from event log
-        job_events = self._get_job_events(ip)
         
         now = datetime.utcnow()
         
@@ -199,15 +196,8 @@ class JobMonitor:
         if pages_printed > 0:
             logger.info(f"Detected {pages_printed} pages printed on {ip}")
             
-            # Determine job status from events
+            # Default to completed status (without event log parsing)
             job_status = 'completed'
-            for code, status in job_events:
-                if status == 'failed':
-                    job_status = 'failed'
-                    break
-                elif status == 'cancelled':
-                    job_status = 'cancelled'
-                    break
             
             # Record the job
             try:
@@ -245,15 +235,6 @@ class JobMonitor:
                         logger.error(f"Failed to dispatch job event: {e}")
             except Exception as e:
                 logger.error(f"Failed to record job: {e}")
-        
-        # Track pending job start events
-        for code, status in job_events:
-            if status == 'started' and state.pending_job_start is None:
-                state.pending_job_start = now
-            elif status in ('completed', 'cancelled', 'failed'):
-                state.pending_job_start = None
-                
-        state.last_event_codes = [code for code, _ in job_events]
         
     def _get_page_count(self, ip: str) -> Optional[int]:
         """Get current page count from printer via SNMP."""
@@ -315,29 +296,6 @@ class JobMonitor:
         except Exception as e:
             logger.debug(f"Error getting page count for {ip}: {e}")
             return None
-            
-    def _get_job_events(self, ip: str) -> List[Tuple[int, str]]:
-        """Get recent job events from printer event log.
-        
-        Returns:
-            List of (event_code, status) tuples for job-related events
-        """
-        try:
-            from app.services.event_logs import get_logs
-            
-            events = get_logs(ip)
-            job_events = []
-            
-            for event in events:
-                if event.code in JOB_EVENT_CODES:
-                    status = JOB_EVENT_CODES[event.code]
-                    job_events.append((event.code, status))
-                    
-            return job_events
-            
-        except Exception as e:
-            logger.debug(f"Error getting job events for {ip}: {e}")
-            return []
             
     def get_state(self, ip: str) -> Optional[PrinterState]:
         """Get the current state for a printer."""

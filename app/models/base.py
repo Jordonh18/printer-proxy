@@ -374,10 +374,23 @@ def init_db():
             model TEXT DEFAULT '',
             department TEXT DEFAULT '',
             notes TEXT DEFAULT '',
+            syslog_enabled BOOLEAN DEFAULT 0,
+            syslog_configured_at TIMESTAMP,
+            snmp_write_community TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Add syslog columns for existing installs
+    cursor.execute("PRAGMA table_info(printers)")
+    printer_columns = {row[1] for row in cursor.fetchall()}
+    if 'syslog_enabled' not in printer_columns:
+        cursor.execute("ALTER TABLE printers ADD COLUMN syslog_enabled BOOLEAN DEFAULT 0")
+    if 'syslog_configured_at' not in printer_columns:
+        cursor.execute("ALTER TABLE printers ADD COLUMN syslog_configured_at TIMESTAMP")
+    if 'snmp_write_community' not in printer_columns:
+        cursor.execute("ALTER TABLE printers ADD COLUMN snmp_write_community TEXT")
 
     # Printer groups table
     cursor.execute("""

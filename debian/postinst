@@ -30,20 +30,31 @@ case "$1" in
 
         # Set ownership of application directory
         chown -R root:root "$APP_DIR"
-        chown -R "$APP_USER:$APP_GROUP" "$APP_DIR/venv" 2>/dev/null || true
 
         # Create Python virtual environment
         if [ ! -d "$APP_DIR/venv" ]; then
             echo "Setting up Python virtual environment..."
-            python3 -m venv "$APP_DIR/venv"
+            python3 -m venv "$APP_DIR/venv" --clear
+            # Bootstrap pip properly
+            "$APP_DIR/venv/bin/python3" -m ensurepip --upgrade
+            "$APP_DIR/venv/bin/pip" install --upgrade pip setuptools wheel
         fi
         
         # Install Python dependencies
-        "$APP_DIR/venv/bin/pip" install --quiet --upgrade pip 2>/dev/null || true
-        "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt" 2>/dev/null || \
+        "$APP_DIR/venv/bin/pip" install --no-cache-dir -r "$APP_DIR/requirements.txt" || \
             echo "Warning: Some Python packages may not have installed correctly"
         
+        # Set ownership of venv after creation
         chown -R "$APP_USER:$APP_GROUP" "$APP_DIR/venv"
+
+        # Grant capability to bind to privileged ports (for syslog on port 514)
+        if command -v setcap >/dev/null 2>&1; then
+            echo "Granting capability to bind to privileged ports..."
+            setcap 'cap_net_bind_service=+ep' "$APP_DIR/venv/bin/python3" || \
+                echo "Warning: Could not set cap_net_bind_service capability. Syslog server may fail to bind to port 514."
+        else
+            echo "Warning: setcap not available. Install libcap2-bin to enable syslog on port 514."
+        fi
 
         # Install sudoers configuration for network helper
         install -m 0440 /dev/stdin /etc/sudoers.d/continuum << 'EOF'

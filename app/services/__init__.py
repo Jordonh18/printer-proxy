@@ -81,14 +81,6 @@ from app.services.workflow_engine import (
     trigger_workflows_for_event,
 )
 
-# Event logs
-from app.services.event_logs import (
-    PrinterEvent,
-    categorize_hp_event_code,
-    get_logs,
-    get_errors,
-)
-
 # Job history
 from app.services.job_history import (
     JobHistoryEntry,
