@@ -23,11 +23,13 @@ echo "=============================================="
 echo ""
 
 # Check for required tools
-for cmd in dpkg-deb fakeroot node npm; do
+for cmd in dpkg-deb fakeroot node npm rsync; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "Error: $cmd is required but not installed."
         if [ "$cmd" = "node" ] || [ "$cmd" = "npm" ]; then
             echo "Install with: sudo apt install nodejs npm"
+        elif [ "$cmd" = "rsync" ]; then
+            echo "Install with: sudo apt install rsync"
         else
             echo "Install with: sudo apt install dpkg-dev fakeroot"
         fi
@@ -80,8 +82,8 @@ mkdir -p "$BUILD_DIR/usr/share/lintian/overrides"
 
 # Copy application files
 echo "Copying application files..."
-# Copy Python files but exclude __pycache__
-find "$PROJECT_DIR/app" -name "*.py" -exec cp {} "$BUILD_DIR/opt/continuum/app/" \;
+# Copy app directory structure while excluding __pycache__
+rsync -a --exclude='__pycache__' --exclude='*.pyc' "$PROJECT_DIR/app/" "$BUILD_DIR/opt/continuum/app/"
 cp "$PROJECT_DIR/config/__init__.py" "$BUILD_DIR/opt/continuum/config/"
 cp "$PROJECT_DIR/config/config.py" "$BUILD_DIR/opt/continuum/config/"
 cp "$PROJECT_DIR/scripts/"*.sh "$BUILD_DIR/opt/continuum/scripts/"

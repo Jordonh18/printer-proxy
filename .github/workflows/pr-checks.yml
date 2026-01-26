@@ -52,7 +52,7 @@ jobs:
           python-version: '3.11'
       
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot gzip
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot gzip rsync
       
       - name: Build .deb package
         run: |
@@ -106,6 +106,13 @@ jobs:
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
           sudo dpkg -i "builds/continuum_${VERSION}_all.deb" || sudo apt-get install -f -y
+      
+      - name: Debug package contents
+        run: |
+          echo "Checking installed app structure:"
+          ls -la /opt/continuum/
+          ls -la /opt/continuum/app/ || echo "app directory missing!"
+          ls -la /opt/continuum/app/models/ || echo "models directory missing!"
       
       - name: Verify installation
         run: |
