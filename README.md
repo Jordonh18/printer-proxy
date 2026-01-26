@@ -7,7 +7,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/Jordonh18/continuum)](https://github.com/Jordonh18/continuum/issues)
 [![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/Jordonh18/continuum?utm_source=oss&utm_medium=github&utm_campaign=Jordonh18%2Fcontinuum&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
 
-A modern network printer management platform with transparent traffic redirection. When a printer fails, Continuum automatically redirects print jobs to working printers using NAT/iptables—no client reconfiguration required.
+A modern network printer management platform with transparent traffic redirection. When a printer fails, Continuum automatically redirects print jobs to working printers using NAT/iptables, no client reconfiguration required.
 
 ## Features
 
@@ -111,7 +111,7 @@ sudo apt-get install -f  # Install dependencies
 └──────────────────┘
 ```
 
-Continuum operates at the network layer, intercepting TCP print traffic destined for a failed printer and transparently redirecting it to a working replacement. The proxy server claims the failed printer's IP address as a secondary interface and applies DNAT rules to forward connections—clients continue printing without any configuration changes.
+Continuum operates at the network layer, intercepting TCP print traffic destined for a failed printer and transparently redirecting it to a working replacement. The proxy server claims the failed printer's IP address as a secondary interface and applies DNAT rules to forward connections, clients continue printing without any configuration changes.
 
 ## Upgrading
 
