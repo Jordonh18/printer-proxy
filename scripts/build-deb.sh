@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Build Debian package for Printer Proxy
+# Build Debian package for Continuum
 #
 set -e
 
@@ -14,7 +14,7 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-PACKAGE_NAME="printer-proxy"
+PACKAGE_NAME="continuum"
 BUILD_DIR="/tmp/${PACKAGE_NAME}-build"
 
 echo "=============================================="
@@ -23,13 +23,45 @@ echo "=============================================="
 echo ""
 
 # Check for required tools
-for cmd in dpkg-deb fakeroot; do
+for cmd in dpkg-deb fakeroot node npm rsync; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "Error: $cmd is required but not installed."
-        echo "Install with: sudo apt install dpkg-dev fakeroot"
+        if [ "$cmd" = "node" ] || [ "$cmd" = "npm" ]; then
+            echo "Install with: sudo apt install nodejs npm"
+        elif [ "$cmd" = "rsync" ]; then
+            echo "Install with: sudo apt install rsync"
+        else
+            echo "Install with: sudo apt install dpkg-dev fakeroot"
+        fi
         exit 1
     fi
 done
+
+# Build React frontend
+echo "Building React frontend..."
+if [ -d "$PROJECT_DIR/frontend" ]; then
+    cd "$PROJECT_DIR/frontend"
+    
+    # Install dependencies if node_modules doesn't exist
+    if [ ! -d "node_modules" ]; then
+        echo "Installing frontend dependencies..."
+        npm install
+    fi
+    
+    # Build production bundle
+    echo "Creating production build..."
+    npm run build
+    
+    cd "$PROJECT_DIR"
+    
+    if [ ! -d "$PROJECT_DIR/frontend/dist" ]; then
+        echo "Error: Frontend build failed - dist directory not created"
+        exit 1
+    fi
+    echo "Frontend build complete!"
+else
+    echo "Warning: frontend directory not found, skipping React build"
+fi
 
 # Clean previous build
 rm -rf "$BUILD_DIR"
@@ -38,47 +70,51 @@ mkdir -p "$BUILD_DIR"
 # Create directory structure
 echo "Creating package structure..."
 mkdir -p "$BUILD_DIR/DEBIAN"
-mkdir -p "$BUILD_DIR/opt/printer-proxy/app"
-mkdir -p "$BUILD_DIR/opt/printer-proxy/config"
-mkdir -p "$BUILD_DIR/opt/printer-proxy/scripts"
-mkdir -p "$BUILD_DIR/opt/printer-proxy/templates/errors"
-mkdir -p "$BUILD_DIR/opt/printer-proxy/static"
-mkdir -p "$BUILD_DIR/etc/printer-proxy"
+mkdir -p "$BUILD_DIR/opt/continuum/app"
+mkdir -p "$BUILD_DIR/opt/continuum/config"
+mkdir -p "$BUILD_DIR/opt/continuum/scripts"
+mkdir -p "$BUILD_DIR/opt/continuum/static"
+mkdir -p "$BUILD_DIR/opt/continuum/frontend/dist"
+mkdir -p "$BUILD_DIR/etc/continuum"
 mkdir -p "$BUILD_DIR/lib/systemd/system"
-mkdir -p "$BUILD_DIR/usr/share/doc/printer-proxy"
+mkdir -p "$BUILD_DIR/usr/share/doc/continuum"
 mkdir -p "$BUILD_DIR/usr/share/lintian/overrides"
 
 # Copy application files
 echo "Copying application files..."
-# Copy Python files but exclude __pycache__
-find "$PROJECT_DIR/app" -name "*.py" -exec cp {} "$BUILD_DIR/opt/printer-proxy/app/" \;
-cp "$PROJECT_DIR/config/__init__.py" "$BUILD_DIR/opt/printer-proxy/config/"
-cp "$PROJECT_DIR/config/config.py" "$BUILD_DIR/opt/printer-proxy/config/"
-cp "$PROJECT_DIR/scripts/"*.sh "$BUILD_DIR/opt/printer-proxy/scripts/"
-cp -r "$PROJECT_DIR/templates/"*.html "$BUILD_DIR/opt/printer-proxy/templates/" 2>/dev/null || true
-cp -r "$PROJECT_DIR/templates/errors/"*.html "$BUILD_DIR/opt/printer-proxy/templates/errors/" 2>/dev/null || true
-cp "$PROJECT_DIR/requirements.txt" "$BUILD_DIR/opt/printer-proxy/"
-cp "$PROJECT_DIR/wsgi.py" "$BUILD_DIR/opt/printer-proxy/"
-cp "$PROJECT_DIR/run.py" "$BUILD_DIR/opt/printer-proxy/"
+# Copy app directory structure while excluding __pycache__
+rsync -a --exclude='__pycache__' --exclude='*.pyc' "$PROJECT_DIR/app/" "$BUILD_DIR/opt/continuum/app/"
+cp "$PROJECT_DIR/config/__init__.py" "$BUILD_DIR/opt/continuum/config/"
+cp "$PROJECT_DIR/config/config.py" "$BUILD_DIR/opt/continuum/config/"
+cp "$PROJECT_DIR/scripts/"*.sh "$BUILD_DIR/opt/continuum/scripts/"
+cp "$PROJECT_DIR/requirements.txt" "$BUILD_DIR/opt/continuum/"
+cp "$PROJECT_DIR/wsgi.py" "$BUILD_DIR/opt/continuum/"
+cp "$PROJECT_DIR/run.py" "$BUILD_DIR/opt/continuum/"
 
 # Copy static files if they exist
 if [ -d "$PROJECT_DIR/static" ] && [ "$(ls -A "$PROJECT_DIR/static" 2>/dev/null)" ]; then
-    cp -r "$PROJECT_DIR/static/"* "$BUILD_DIR/opt/printer-proxy/static/" 2>/dev/null || true
+    cp -r "$PROJECT_DIR/static/"* "$BUILD_DIR/opt/continuum/static/" 2>/dev/null || true
+fi
+
+# Copy React frontend build
+if [ -d "$PROJECT_DIR/frontend/dist" ]; then
+    echo "Copying React frontend build..."
+    cp -r "$PROJECT_DIR/frontend/dist/"* "$BUILD_DIR/opt/continuum/frontend/dist/"
 fi
 
 # Copy systemd service
-cp "$PROJECT_DIR/debian/printer-proxy.service" "$BUILD_DIR/lib/systemd/system/"
+cp "$PROJECT_DIR/debian/continuum.service" "$BUILD_DIR/lib/systemd/system/"
 
 # Copy and compress changelog for Debian documentation
 echo "Creating Debian documentation..."
-gzip -9cn "$PROJECT_DIR/debian/changelog" > "$BUILD_DIR/usr/share/doc/printer-proxy/changelog.Debian.gz"
+gzip -9cn "$PROJECT_DIR/debian/changelog" > "$BUILD_DIR/usr/share/doc/continuum/changelog.Debian.gz"
 
 # Copy copyright file
-cp "$PROJECT_DIR/debian/copyright" "$BUILD_DIR/usr/share/doc/printer-proxy/"
+cp "$PROJECT_DIR/debian/copyright" "$BUILD_DIR/usr/share/doc/continuum/"
 
 # Copy lintian overrides
-cp "$PROJECT_DIR/debian/printer-proxy.lintian-overrides" \
-   "$BUILD_DIR/usr/share/lintian/overrides/printer-proxy"
+cp "$PROJECT_DIR/debian/continuum.lintian-overrides" \
+   "$BUILD_DIR/usr/share/lintian/overrides/continuum"
 
 # Create DEBIAN control file
 cat > "$BUILD_DIR/DEBIAN/control" << EOF
@@ -91,9 +127,9 @@ Depends: python3 (>= 3.9), python3-venv, python3-pip, adduser, iptables, iproute
 Recommends: snmp
 Suggests: ufw
 Maintainer: Jordon Harrison <jordonh18@users.noreply.github.com>
-Homepage: https://github.com/Jordonh18/printer-proxy
+Homepage: https://github.com/Jordonh18/continuum
 Description: Network printer traffic redirection tool with web interface
- Printer Proxy is a web application that redirects network print traffic
+ Continuum is a web application that redirects network print traffic
  from one printer IP address to another using NAT/iptables rules. This
  allows print clients to continue using the same IP address when a printer
  fails, while traffic is transparently forwarded to a working backup printer.
@@ -116,7 +152,7 @@ cp "$PROJECT_DIR/debian/postrm" "$BUILD_DIR/DEBIAN/"
 chmod 755 "$BUILD_DIR/DEBIAN/postinst"
 chmod 755 "$BUILD_DIR/DEBIAN/prerm"
 chmod 755 "$BUILD_DIR/DEBIAN/postrm"
-chmod 755 "$BUILD_DIR/opt/printer-proxy/scripts/"*.sh
+chmod 755 "$BUILD_DIR/opt/continuum/scripts/"*.sh
 
 # Build the package
 echo "Building .deb package..."

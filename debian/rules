@@ -26,4 +26,4 @@ override_dh_installsystemd:
 # Ensure scripts are executable
 override_dh_fixperms:
 	dh_fixperms
-	chmod 755 debian/printer-proxy/opt/printer-proxy/scripts/*.sh || true
+	chmod 755 debian/continuum/opt/continuum/scripts/*.sh || true

@@ -1,3 +1,3 @@
 """
-Printer Proxy configuration package
+Continuum configuration package
 """

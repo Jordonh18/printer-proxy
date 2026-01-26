@@ -1,4 +1,4 @@
-# Printer Proxy - Feature Roadmap
+# Continuum - Feature Roadmap
 
 ## 🔥 High Priority
 
@@ -9,11 +9,20 @@
 - [x] Rollback capability on failed update
 - [x] Update notification banner in UI
 
-### Notification System
-- [ ] Email alerts (SMTP configuration)
+### ~~Notification System~~ ✅ DONE
+- [x] Email alerts (SMTP configuration)
+- [x] Notification preferences per user
+- [x] Security event notifications (login alerts)
+- [x] Health check notifications (offline/online alerts)
+- [x] Job failure notifications
+- [x] Weekly report generation (backend scheduler)
 - [ ] Webhook support (Slack, Teams, Discord)
+- [ ] Custom Reports page with scheduling
+  - Weekly report preferences UI
+  - Custom report templates
+  - Schedule configuration (daily, weekly, monthly)
+  - Manual report generation
 - [ ] Configurable alert triggers:
-  - Printer offline
   - Toner low (configurable threshold)
   - Redirect activated/deactivated
   - Failed health checks (consecutive failures)
@@ -47,15 +56,15 @@
 ## 💡 Nice to Have
 
 ### Dark Mode
-- [ ] CSS theme toggle
-- [ ] Remember preference
-- [ ] System preference detection
+- [x] CSS theme toggle
+- [x] Remember preference
+- [x] System preference detection
 
 ### Multi-user Roles
-- [ ] Admin role (full access)
-- [ ] Operator role (manage redirects, view only printers)
-- [ ] Viewer role (read-only dashboard)
-- [ ] User management page
+- [x ] Admin role (full access)
+- [x ] Operator role (manage redirects, view only printers)
+- [ x] Viewer role (read-only dashboard)
+- [ x] User management page
 
 ### Printer Groups
 - [ ] Create groups (e.g., "Floor 1", "Marketing")
@@ -85,3 +94,7 @@
 - [x] Dashboard with status overview
 - [x] Debian package builds
 - [x] **Auto-Update System** - Check GitHub releases, one-click update from web UI
+
+
+
+auto snapshots and backups of data allowing rollback at any time incase of a configuraton issue or update etc.

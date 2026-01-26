@@ -1,0 +1,219 @@
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { workflowApi } from '@/lib/api';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { toast } from '@/lib/toast';
+import { useAuth } from '@/contexts/AuthContext';
+import type { Workflow } from '@/types/api';
+import { Pause, Play, Trash2 } from 'lucide-react';
+
+export function WorkflowsPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const canEdit = user?.role !== 'viewer';
+  const { data: workflows = [], isLoading } = useQuery({
+    queryKey: ['workflows'],
+    queryFn: workflowApi.getAll,
+  });
+
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [workflowToDelete, setWorkflowToDelete] = useState<Workflow | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const sorted = useMemo(() => {
+    return [...workflows].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  }, [workflows]);
+
+  const handleCreate = async () => {
+    if (!name.trim()) {
+      toast.error('Workflow name is required');
+      return;
+    }
+    try {
+      setIsCreating(true);
+      const workflow = await workflowApi.create({ name: name.trim(), description: description.trim() });
+      toast.success('Workflow created');
+      setIsDialogOpen(false);
+      setName('');
+      setDescription('');
+      navigate(`/workflows/${workflow.id}`);
+    } catch (error) {
+      toast.error('Failed to create workflow', error instanceof Error ? error.message : undefined);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleToggleActive = async (workflow: Workflow, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!canEdit) return;
+    
+    try {
+      setTogglingId(workflow.id);
+      await workflowApi.update(workflow.id, { is_active: !workflow.is_active });
+      toast.success(workflow.is_active ? 'Workflow paused' : 'Workflow activated');
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+    } catch (error) {
+      toast.error('Failed to update workflow', error instanceof Error ? error.message : undefined);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleDeleteClick = (workflow: Workflow, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setWorkflowToDelete(workflow);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!workflowToDelete) return;
+    
+    try {
+      setIsDeleting(true);
+      await workflowApi.delete(workflowToDelete.id);
+      toast.success('Workflow deleted');
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      setDeleteDialogOpen(false);
+      setWorkflowToDelete(null);
+    } catch (error) {
+      toast.error('Failed to delete workflow', error instanceof Error ? error.message : undefined);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Workflows</h1>
+          <p className="text-sm text-muted-foreground">
+            Build automation flows for printers, queues, and integrations.
+          </p>
+        </div>
+        {canEdit && (
+          <Button onClick={() => setIsDialogOpen(true)}>New Workflow</Button>
+        )}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {isLoading && (
+          <Card>
+            <CardContent className="py-8 text-sm text-muted-foreground">Loading workflows...</CardContent>
+          </Card>
+        )}
+        {!isLoading && sorted.length === 0 && (
+          <Card>
+            <CardContent className="py-8 text-sm text-muted-foreground">
+              No workflows yet. Create one to start building automated printer flows.
+            </CardContent>
+          </Card>
+        )}
+        {sorted.map((workflow: Workflow) => (
+          <Card key={workflow.id} className="cursor-pointer transition hover:border-primary/40" onClick={() => navigate(`/workflows/${workflow.id}`)}>
+            <CardHeader className="space-y-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex-1">{workflow.name}</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Badge variant={workflow.is_active ? 'default' : 'secondary'}>
+                    {workflow.is_active ? 'Active' : 'Paused'}
+                  </Badge>
+                  {canEdit && (
+                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={(e) => handleToggleActive(workflow, e)}
+                        disabled={togglingId === workflow.id}
+                        title={workflow.is_active ? 'Pause workflow' : 'Activate workflow'}
+                      >
+                        {workflow.is_active ? (
+                          <Pause className="h-4 w-4" />
+                        ) : (
+                          <Play className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        onClick={(e) => handleDeleteClick(workflow, e)}
+                        title="Delete workflow"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {workflow.description || 'No description provided.'}
+              </p>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground">
+              Updated {workflow.updated_at ? new Date(workflow.updated_at).toLocaleString() : '—'}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New Workflow</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name</label>
+              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Printer fallback flow" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description</label>
+              <Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Describe what this workflow does" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreate} disabled={isCreating}>
+              {isCreating ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Workflow</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{workflowToDelete?.name}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} disabled={isDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

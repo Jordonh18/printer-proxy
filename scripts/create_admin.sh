@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Create the initial admin user for Printer Proxy
+# Create the initial admin user for Continuum
 #
 # Usage: ./create_admin.sh <username> <password>
 #

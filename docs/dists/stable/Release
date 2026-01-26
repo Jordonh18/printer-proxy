@@ -1,11 +1,11 @@
-Origin: Printer Proxy
-Label: Printer Proxy
+Origin: Continuum
+Label: Continuum
 Suite: stable
 Codename: stable
 Date: Mon, 19 Jan 2026 09:13:21 +0000
 Architectures: all
 Components: main
-Description: Printer Proxy APT Repository
+Description: Continuum APT Repository
 MD5Sum:
  0d0b6460db0bf57243ca8cacf34bd0f7 791 main/binary-all/Packages
  50f17c4f844e9986fec454b75344d6cb 540 main/binary-all/Packages.gz

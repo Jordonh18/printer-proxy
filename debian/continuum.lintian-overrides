@@ -1,0 +1,31 @@
+# Lintian overrides for continuum
+#
+# This package uses /opt for installation, which is non-standard but
+# intentional for this self-contained web application that requires
+# a Python virtual environment and needs to be isolated from system Python.
+# See debian/README.source for full justification.
+
+# We install to /opt which is allowed by FHS 3.0 section 3.13 for
+# "add-on application software packages"
+continuum: dir-or-file-in-opt [opt/continuum/*]
+
+# Python bytecode is regenerated at runtime in the venv
+continuum: package-installs-python-pycache-dir [opt/continuum/app/__pycache__/]
+
+# run.py is imported by gunicorn, not run directly
+continuum: script-not-executable [opt/continuum/run.py]
+
+# External CDN resources - this is a local-network appliance, not a redistributable
+# desktop package. CDN delivery is intentional for offline-capable deployment.
+continuum: privacy-breach-uses-embedded-file *
+continuum: privacy-breach-generic *
+
+# We use recursive chown for /var/lib/continuum and /var/log/continuum
+# directories which are owned entirely by this package
+continuum: recursive-privilege-change *
+
+# adduser is in Depends, this is a false positive due to command detection
+continuum: maintainer-script-needs-depends-on-adduser *
+
+# We handle systemd service ourselves since the service file lives in /opt
+continuum: maintainer-script-calls-systemctl *

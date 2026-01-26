@@ -5,9 +5,14 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from datetime import timedelta
 
-from flask import Flask
-from flask_wtf.csrf import CSRFProtect
+from flask import Flask, request
+from flask_jwt_extended import JWTManager
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_compress import Compress
 
 from config.config import (
     SECRET_KEY,
@@ -15,13 +20,24 @@ from config.config import (
     LOG_FORMAT,
     LOG_MAX_SIZE_MB,
     LOG_BACKUP_COUNT,
-    SESSION_TIMEOUT_MINUTES
+    SESSION_TIMEOUT_MINUTES,
+    JWT_SECRET_KEY,
+    JWT_ACCESS_TOKEN_EXPIRES_HOURS,
+    JWT_REFRESH_TOKEN_EXPIRES_DAYS
 )
-from app.models import init_db
-from app.auth import login_manager
+from app.models.base import init_db
+from app.utils.auth import login_manager
+from app.utils.rate_limiting import get_ip_for_ratelimit, handle_rate_limit_exceeded
 
 
-csrf = CSRFProtect()
+jwt = JWTManager()
+limiter = Limiter(
+    key_func=get_ip_for_ratelimit,
+    default_limits=["100 per minute", "1000 per hour"],
+    storage_uri="memory://",
+    strategy="fixed-window"
+)
+compress = Compress()
 
 
 def create_app() -> Flask:
@@ -31,7 +47,7 @@ def create_app() -> Flask:
     # Get the base directory (parent of app/)
     base_dir = Path(__file__).resolve().parent.parent
     
-    app = Flask('printer-proxy', 
+    app = Flask('continuum', 
                 template_folder=str(base_dir / 'templates'),
                 static_folder=str(base_dir / 'static'))
     
@@ -42,6 +58,12 @@ def create_app() -> Flask:
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     
+    # JWT Configuration
+    app.config['JWT_SECRET_KEY'] = JWT_SECRET_KEY
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=JWT_ACCESS_TOKEN_EXPIRES_HOURS)
+    app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=JWT_REFRESH_TOKEN_EXPIRES_DAYS)
+    app.config['JWT_TOKEN_LOCATION'] = ['headers']
+    
     # Make version available in all templates
     app.config['VERSION'] = __version__
     app.config['VERSION_STRING'] = VERSION_STRING
@@ -51,49 +73,130 @@ def create_app() -> Flask:
         return {'app_version': __version__, 'version_string': VERSION_STRING}
     
     # Initialize extensions
-    csrf.init_app(app)
     login_manager.init_app(app)
+    jwt.init_app(app)
+    limiter.init_app(app)
+    
+    # Enable gzip compression for all responses (massive speed improvement)
+    app.config['COMPRESS_MIMETYPES'] = ['text/html', 'text/css', 'text/xml', 'application/json', 'application/javascript']
+    app.config['COMPRESS_LEVEL'] = 6  # Balance between speed and compression
+    app.config['COMPRESS_MIN_SIZE'] = 500  # Only compress responses > 500 bytes
+    compress.init_app(app)
+    
+    # Enable CORS for API routes (React frontend)
+    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+    
+    # Note: CSRF is NOT initialized since we're using JWT for all API routes
+    # and React handles the frontend (no form submissions need CSRF)
     
     # Initialize database
     init_db()
     
     # Initialize health check tables
-    from app.health_check import init_health_check_tables, start_health_checks
+    from app.services.health_check import init_health_check_tables, start_health_checks
     init_health_check_tables()
     
     # Start background health checks (only in production, not in reloader)
     if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         # Only start printer polling services if printers exist
-        from app.printers import get_registry
+        from app.services.printer_registry import get_registry
         registry = get_registry()
         if registry.has_printers():
             start_health_checks()
             
             # Start the job monitor for print job detection
-            from app.job_monitor import init_job_monitor
+            from app.services.job_monitor import init_job_monitor
             init_job_monitor(app, start=True)
         else:
             app.logger.info("No printers registered; deferring polling services")
         
         # Start the auto-update checker
-        from app.updater import init_updater
+        from app.services.updater import init_updater
         init_updater(start_background=True)
+        
+        # Start the weekly report scheduler
+        from app.services.notification_sender import start_weekly_reports
+        start_weekly_reports()
+
+        # Start group redirect scheduler
+        from app.services.schedulers.group_redirect import init_group_redirect_scheduler
+        init_group_redirect_scheduler(start_background=True)
+
+        # Start printer redirect scheduler
+        from app.services.schedulers.printer_redirect import init_printer_redirect_scheduler
+        init_printer_redirect_scheduler(start_background=True)
+        
+        # Start workflow scheduler
+        from app.services.schedulers.workflow import reload_workflow_schedules
+        reload_workflow_schedules()
     
     # Setup logging
     setup_logging(app)
     
-    # Register blueprints
-    from app.routes import main_bp, auth_bp, api_bp
-    app.register_blueprint(main_bp)
-    app.register_blueprint(auth_bp, url_prefix='/auth')
+    # Register API blueprint only - React handles all UI
+    from app.routes import api_bp
     app.register_blueprint(api_bp, url_prefix='/api')
+    
+    # Serve React frontend
+    setup_react_frontend(app, base_dir)
     
     # Error handlers
     register_error_handlers(app)
     
-    app.logger.info("Printer Proxy application started")
+    app.logger.info("Continuum application started")
     
     return app
+
+
+def setup_react_frontend(app: Flask, base_dir: Path):
+    """Configure serving of React frontend for production."""
+    from flask import send_from_directory, send_file, request
+    
+    # Path to the React build directory
+    frontend_dist = base_dir / 'frontend' / 'dist'
+    
+    # Only serve React frontend if the build exists
+    if not frontend_dist.exists():
+        app.logger.info("React frontend not built; using legacy templates")
+        app.config['USE_REACT_FRONTEND'] = False
+        return
+    
+    app.logger.info(f"Serving React frontend from {frontend_dist}")
+    app.config['USE_REACT_FRONTEND'] = True
+    app.config['REACT_DIST_PATH'] = frontend_dist
+    
+    # Serve React static assets
+    @app.route('/assets/<path:filename>')
+    def react_assets(filename):
+        return send_from_directory(frontend_dist / 'assets', filename)
+    
+    # Serve vite.svg favicon
+    @app.route('/vite.svg')
+    def react_vite_svg():
+        return send_from_directory(frontend_dist, 'vite.svg')
+    
+    # Override the root route before blueprints process it
+    @app.before_request
+    def serve_react_for_spa_routes():
+        """Intercept SPA routes and serve React app."""
+        # Skip API routes
+        if request.path.startswith('/api/'):
+            return None
+        
+        # Skip static files
+        if request.path.startswith('/static/'):
+            return None
+        
+        # Skip assets (already handled)
+        if request.path.startswith('/assets/'):
+            return None
+        
+        # For all other routes, serve React index.html
+        index_file = frontend_dist / 'index.html'
+        if index_file.exists():
+            return send_file(index_file)
+        
+        return None  # Fall through to normal routing
 
 
 def setup_logging(app: Flask):
@@ -141,18 +244,27 @@ def setup_logging(app: Flask):
 
 
 def register_error_handlers(app: Flask):
-    """Register error handlers."""
-    from flask import render_template
+    """Register error handlers that return JSON for API errors."""
+    from flask import jsonify, request
+    from werkzeug.exceptions import TooManyRequests
+    from app.utils.rate_limiting import handle_rate_limit_exceeded
+    
+    # Rate limit error handler
+    app.errorhandler(429)(handle_rate_limit_exceeded)
+    app.errorhandler(TooManyRequests)(handle_rate_limit_exceeded)
     
     @app.errorhandler(404)
     def not_found_error(error):
-        return render_template('errors/404.html'), 404
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'Not found'}), 404
+        # For non-API routes, React handles 404
+        return app.send_static_file('index.html') if app.config.get('USE_REACT_FRONTEND') else (jsonify({'error': 'Not found'}), 404)
     
     @app.errorhandler(500)
     def internal_error(error):
         app.logger.error(f"Internal server error: {error}")
-        return render_template('errors/500.html'), 500
+        return jsonify({'error': 'Internal server error'}), 500
     
     @app.errorhandler(403)
     def forbidden_error(error):
-        return render_template('errors/403.html'), 403
+        return jsonify({'error': 'Forbidden'}), 403

@@ -1,5 +1,5 @@
 """
-Printer Proxy Configuration
+Continuum Configuration
 Auto-detects network settings from the host machine.
 """
 import os
@@ -85,21 +85,21 @@ def _get_or_create_secret_key(data_dir: Path) -> str:
 # =============================================================================
 
 # Detect if running from installed location or development
-_installed_path = Path('/opt/printer-proxy')
+_installed_path = Path('/opt/continuum')
 _is_installed = _installed_path.exists() and (
-    Path('/etc/systemd/system/printer-proxy.service').exists() or
-    Path('/lib/systemd/system/printer-proxy.service').exists()
+    Path('/etc/systemd/system/continuum.service').exists() or
+    Path('/lib/systemd/system/continuum.service').exists()
 )
 
 if _is_installed:
     BASE_DIR = _installed_path
-    CONFIG_DIR = Path('/etc/printer-proxy')
-    DATA_DIR = Path('/var/lib/printer-proxy')
-    LOG_DIR = Path('/var/log/printer-proxy')
+    CONFIG_DIR = Path('/etc/continuum')
+    DATA_DIR = Path('/var/lib/continuum')
+    LOG_DIR = Path('/var/log/continuum')
 else:
     BASE_DIR = Path(__file__).parent.parent
     CONFIG_DIR = BASE_DIR / 'config'
-    DATA_DIR = BASE_DIR / 'data'
+    DATA_DIR = BASE_DIR / 'app' / 'data'
     LOG_DIR = BASE_DIR / 'logs'
 
 # Ensure directories exist
@@ -123,7 +123,7 @@ MANAGEMENT_IP = os.environ.get('PROXY_MGMT_IP') or _get_management_ip(NETWORK_IN
 # Application Paths
 # =============================================================================
 
-DATABASE_PATH = DATA_DIR / 'printer_proxy.db'
+DATABASE_PATH = DATA_DIR / 'continuum.db'
 HELPER_SCRIPT = BASE_DIR / 'scripts' / 'network_helper.sh'
 
 # =============================================================================
@@ -173,3 +173,11 @@ PASSWORD_REQUIRE_SPECIAL = True
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 15
+
+# =============================================================================
+# JWT Settings
+# =============================================================================
+
+JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or _get_or_create_secret_key(DATA_DIR) + '-jwt'
+JWT_ACCESS_TOKEN_EXPIRES_HOURS = 24
+JWT_REFRESH_TOKEN_EXPIRES_DAYS = 30

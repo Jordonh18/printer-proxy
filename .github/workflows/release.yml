@@ -99,7 +99,7 @@ jobs:
               echo '__version_info__ = tuple(int(x) for x in __version__.split("."))'
               echo ''
               echo '# For display'
-              echo 'VERSION_STRING = f"Printer Proxy v{__version__}"'
+              echo 'VERSION_STRING = f"Continuum v{__version__}"'
             } > app/version.py
             echo "Updated app/version.py to $VERSION"
           fi
@@ -112,7 +112,7 @@ jobs:
       - name: Verify package
         run: |
           VERSION="${{ needs.check-changes.outputs.new_version }}"
-          DEB_FILE="builds/printer-proxy_${VERSION}_all.deb"
+          DEB_FILE="builds/continuum_${VERSION}_all.deb"
           
           if [ ! -f "$DEB_FILE" ]; then
             echo "ERROR: Package not built"
@@ -120,7 +120,7 @@ jobs:
           fi
           
           dpkg-deb --info "$DEB_FILE"
-          cd builds && sha256sum -c "printer-proxy_${VERSION}_all.deb.sha256"
+          cd builds && sha256sum -c "continuum_${VERSION}_all.deb.sha256"
       
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -155,16 +155,16 @@ jobs:
       - name: Test installation
         run: |
           VERSION="${{ needs.check-changes.outputs.new_version }}"
-          sudo dpkg -i "builds/printer-proxy_${VERSION}_all.deb" || sudo apt-get install -f -y
+          sudo dpkg -i "builds/continuum_${VERSION}_all.deb" || sudo apt-get install -f -y
       
       - name: Verify installation
         run: |
-          [ -d "/opt/printer-proxy" ] && echo "OK: App directory exists"
-          [ -d "/opt/printer-proxy/venv" ] && echo "OK: Virtual environment created"
-          [ -f "/lib/systemd/system/printer-proxy.service" ] && echo "OK: Service installed"
+          [ -d "/opt/continuum" ] && echo "OK: App directory exists"
+          [ -d "/opt/continuum/venv" ] && echo "OK: Virtual environment created"
+          [ -f "/lib/systemd/system/continuum.service" ] && echo "OK: Service installed"
           
-          cd /opt/printer-proxy
-          sudo -u printer-proxy /opt/printer-proxy/venv/bin/python -c "from app import create_app; print('Imports OK')"
+          cd /opt/continuum
+          sudo -u continuum /opt/continuum/venv/bin/python -c "from app import create_app; print('Imports OK')"
 
   release:
     name: Create Release
@@ -205,13 +205,13 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ needs.check-changes.outputs.new_version }}
-          name: Printer Proxy v${{ needs.check-changes.outputs.new_version }}
+          name: Continuum v${{ needs.check-changes.outputs.new_version }}
           body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(needs.check-changes.outputs.new_version, 'beta') || contains(needs.check-changes.outputs.new_version, 'alpha') }}
           files: |
-            builds/printer-proxy_${{ needs.check-changes.outputs.new_version }}_all.deb
-            builds/printer-proxy_${{ needs.check-changes.outputs.new_version }}_all.deb.sha256
+            builds/continuum_${{ needs.check-changes.outputs.new_version }}_all.deb
+            builds/continuum_${{ needs.check-changes.outputs.new_version }}_all.deb.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -241,7 +241,7 @@ jobs:
       - name: Build APT repository
         run: |
           VERSION="${{ needs.check-changes.outputs.new_version }}"
-          DEB_FILE="builds/printer-proxy_${VERSION}_all.deb"
+          DEB_FILE="builds/continuum_${VERSION}_all.deb"
           
           # Create site directory
           mkdir -p site/pool/main

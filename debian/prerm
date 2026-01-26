@@ -1,5 +1,5 @@
 #!/bin/sh
-# prerm script for printer-proxy
+# prerm script for continuum
 #
 # See: dh_installdeb(1)
 
@@ -8,8 +8,8 @@ set -e
 case "$1" in
     remove|upgrade|deconfigure)
         # Stop the service gracefully
-        if systemctl is-active --quiet printer-proxy.service 2>/dev/null; then
-            systemctl stop printer-proxy.service || true
+        if systemctl is-active --quiet continuum.service 2>/dev/null; then
+            systemctl stop continuum.service || true
         fi
         ;;
 
